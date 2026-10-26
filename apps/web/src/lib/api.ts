@@ -279,6 +279,62 @@ export const api = {
         }>;
       }>(`/api/templates/search?q=${encodeURIComponent(query)}`),
   },
+  repair: {
+    healed: (flowId: string) =>
+      request<{
+        healed: Array<{
+          runId: string;
+          nodeId: string;
+          nodeType: string;
+          status: string;
+          durationMs: number;
+          datasetId: string | null;
+          runStatus: string;
+          createdAt: string;
+          screenshotPath: string | null;
+          resolvedTarget: {
+            strategy: string;
+            index: number;
+            matchCount: number;
+            healed: boolean;
+            confidence: number;
+          } | null;
+        }>;
+      }>(`/api/flows/${flowId}/healed`).then((r) => r.healed),
+    repairs: (flowId: string) =>
+      request<{ repairs: Array<Record<string, unknown>> }>(
+        `/api/flows/${flowId}/repairs`,
+      ).then((r) => r.repairs),
+    health: (flowId: string) =>
+      request<{
+        health: {
+          recentRuns: number;
+          failed: number;
+          healed: number;
+          runs: Array<{
+            id: string;
+            status: string;
+            datasetId: string | null;
+            startedAt: string | null;
+            finishedAt: string | null;
+          }>;
+        };
+      }>(`/api/flows/${flowId}/health`).then((r) => r.health),
+    apply: (
+      flowId: string,
+      body: {
+        nodeId: string;
+        action: "promote" | "replace";
+        targetPath?: "target" | "trigger" | "panel" | "commit";
+        strategyIndex?: number;
+        strategy?: unknown;
+      },
+    ) =>
+      request<{ flow: FlowDetail; repair: Record<string, unknown> }>(
+        `/api/flows/${flowId}/repair`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+  },
   health: () =>
     request<{
       ok: boolean;

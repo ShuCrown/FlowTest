@@ -624,6 +624,96 @@ export class Store {
       .all() as Array<Record<string, unknown>>;
   }
 
+  listHealed(flowId: string, limit = 100): Array<Record<string, unknown>> {
+    const rows = this.sqlite
+      .prepare(
+        `SELECT rn.*, r.created_at AS run_created_at, r.dataset_id, r.status AS run_status
+         FROM run_nodes rn JOIN runs r ON r.id = rn.run_id
+         WHERE r.flow_id = ? AND rn.resolved_target_json LIKE '%"healed":true%'
+         ORDER BY r.created_at DESC LIMIT ${Math.min(limit, 200)}`,
+      )
+      .all(flowId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      runId: row.run_id,
+      nodeId: row.node_id,
+      nodeType: row.node_type,
+      status: row.status,
+      durationMs: row.duration_ms,
+      resolvedTarget: row.resolved_target_json ? JSON.parse(String(row.resolved_target_json)) : null,
+      screenshotPath: row.screenshot_path,
+      datasetId: row.dataset_id,
+      runStatus: row.run_status,
+      createdAt: row.run_created_at,
+    }));
+  }
+
+  recordRepair(input: {
+    flowId: string;
+    nodeId: string;
+    kind: string;
+    before: unknown;
+    after: unknown;
+  }): number {
+    const result = this.sqlite
+      .prepare(
+        `INSERT INTO repair_actions(flow_id, node_id, kind, before_json, after_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.flowId,
+        input.nodeId,
+        input.kind,
+        JSON.stringify(input.before),
+        JSON.stringify(input.after),
+        new Date().toISOString(),
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  listRepairs(flowId: string): Array<Record<string, unknown>> {
+    const rows = this.sqlite
+      .prepare("SELECT * FROM repair_actions WHERE flow_id=? ORDER BY created_at DESC LIMIT 100")
+      .all(flowId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      id: row.id,
+      nodeId: row.node_id,
+      kind: row.kind,
+      before: row.before_json ? JSON.parse(String(row.before_json)) : null,
+      after: row.after_json ? JSON.parse(String(row.after_json)) : null,
+      createdAt: row.created_at,
+    }));
+  }
+
+  flowHealth(flowId: string): {
+    recentRuns: number;
+    failed: number;
+    healed: number;
+    runs: Array<Record<string, unknown>>;
+  } {
+    const runs = this.sqlite
+      .prepare("SELECT * FROM runs WHERE flow_id=? ORDER BY created_at DESC LIMIT 20")
+      .all(flowId) as Array<Record<string, unknown>>;
+    const healed = this.sqlite
+      .prepare(
+        `SELECT COUNT(*) AS count FROM run_nodes rn JOIN runs r ON r.id=rn.run_id
+         WHERE r.flow_id=? AND rn.resolved_target_json LIKE '%"healed":true%'`,
+      )
+      .get(flowId) as { count: number };
+    return {
+      recentRuns: runs.length,
+      failed: runs.filter((run) => run.status === "failed").length,
+      healed: healed.count,
+      runs: runs.map((run) => ({
+        id: run.id,
+        status: run.status,
+        datasetId: run.dataset_id,
+        startedAt: run.started_at,
+        finishedAt: run.finished_at,
+        error: run.error_json ? JSON.parse(String(run.error_json)) : null,
+      })),
+    };
+  }
+
   getRunDetail(id: string): Record<string, unknown> | undefined {
     const run = this.getRun(id);
     if (!run) return undefined;

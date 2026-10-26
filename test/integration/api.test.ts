@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test, { after, before } from "node:test";
 import type { FlowNode } from "@flowforge/dsl";
 import { startServer, type Runtime } from "../../apps/api/src/index.js";
-import { customerCreateFlow, flowFor, resetFixture } from "../helpers/flows.js";
+import { customerCreateFlow, flowFor, resetFixture, variantFlow } from "../helpers/flows.js";
 import { startFixtureServer, type FixtureServerHandle } from "../../fixtures/server.mjs";
 
 let fixture: FixtureServerHandle;
@@ -251,6 +251,71 @@ test("AI 默认关闭、上下文包与模板检索可用", async () => {
   assert.ok(templates.body.templates.length >= 1);
   assert.equal(templates.body.templates[0].flow.name, "集成测试流程");
   assert.ok(templates.body.templates[0].flow.dsl);
+});
+
+test("HEALED 清单、提升首选与修复审计", async () => {
+  const flow = await jsonRequest("/api/flows", {
+    method: "POST",
+    body: JSON.stringify({ dsl: variantFlow(fixture.baseUrl) }),
+  });
+  assert.equal(flow.status, 201, JSON.stringify(flow.body));
+  const flowId = flow.body.id as string;
+
+  const runOnce = async (): Promise<any> => {
+    const started = await jsonRequest(`/api/flows/${flowId}/runs`, {
+      method: "POST",
+      body: JSON.stringify({ mode: "probe", headless: true }),
+    });
+    assert.equal(started.status, 202, JSON.stringify(started.body));
+    const deadline = Date.now() + 20000;
+    let detail: any;
+    do {
+      await sleep(300);
+      detail = (await jsonRequest(`/api/runs/${started.body.id}`)).body;
+      if (["finished", "failed", "canceled"].includes(detail.status)) break;
+    } while (Date.now() < deadline);
+    return detail;
+  };
+
+  const first = await runOnce();
+  assert.equal(first.status, "finished", JSON.stringify(first.error));
+  const healedNode = first.nodes.find((node: any) => node.nodeId === "fill-name");
+  assert.equal(healedNode.status, "healed");
+  assert.equal(healedNode.resolvedTarget.healed, true);
+
+  const healed = await jsonRequest(`/api/flows/${flowId}/healed`);
+  assert.equal(healed.status, 200);
+  assert.equal(healed.body.healed.length, 1);
+  assert.equal(healed.body.healed[0].nodeId, "fill-name");
+  assert.equal(healed.body.healed[0].resolvedTarget.index, 1);
+
+  const repaired = await jsonRequest(`/api/flows/${flowId}/repair`, {
+    method: "POST",
+    body: JSON.stringify({
+      nodeId: "fill-name",
+      action: "promote",
+      targetPath: "target",
+      strategyIndex: 1,
+    }),
+  });
+  assert.equal(repaired.status, 200, JSON.stringify(repaired.body));
+  const target = repaired.body.flow.dsl.nodes.find((node: any) => node.id === "fill-name").target;
+  assert.equal(target.strategies[0].type, "label");
+  assert.equal(target.strategies[0].value, "客户全称");
+  assert.equal(repaired.body.repair.kind, "promote");
+
+  const history = await jsonRequest(`/api/flows/${flowId}/repairs`);
+  assert.equal(history.body.repairs.length, 1);
+
+  const second = await runOnce();
+  assert.equal(second.status, "finished", JSON.stringify(second.error));
+  const promotedNode = second.nodes.find((node: any) => node.nodeId === "fill-name");
+  assert.equal(promotedNode.status, "pass");
+  assert.equal(promotedNode.resolvedTarget.healed, false);
+
+  const health = await jsonRequest(`/api/flows/${flowId}/health`);
+  assert.equal(health.body.health.recentRuns, 2);
+  assert.equal(health.body.health.failed, 0);
 });
 
 test("运行数据导出 CSV / JSON", async () => {

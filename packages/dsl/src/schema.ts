@@ -350,7 +350,7 @@ export interface FlowDsl {
   entry: string;
 }
 
-const StrategySchema: z.ZodType<Strategy> = z.discriminatedUnion("type", [
+export const StrategySchema: z.ZodType<Strategy> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("testid"), value: z.string().min(1) }),
   z.object({
     type: z.literal("role"),

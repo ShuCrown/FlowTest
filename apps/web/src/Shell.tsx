@@ -6,6 +6,7 @@ const NAV = [
   { to: "/systems", label: "系统", code: "SYS" },
   { to: "/runs", label: "运行", code: "RUN" },
   { to: "/recordings", label: "采集", code: "REC" },
+  { to: "/repair", label: "修复", code: "FIX" },
   { to: "/settings", label: "设置", code: "CFG" },
 ];
 

@@ -4,6 +4,7 @@ import { EditorPage } from "./pages/EditorPage.js";
 import { FlowsPage } from "./pages/FlowsPage.js";
 import { MatrixPage } from "./pages/MatrixPage.js";
 import { RecordingsPage } from "./pages/RecordingsPage.js";
+import { RepairPage } from "./pages/RepairPage.js";
 import { RunDetailPage } from "./pages/RunDetailPage.js";
 import { RunsPage } from "./pages/RunsPage.js";
 import { SettingsPage } from "./pages/SettingsPage.js";
@@ -20,6 +21,7 @@ export function App() {
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:id" element={<RunDetailPage />} />
         <Route path="recordings" element={<RecordingsPage />} />
+        <Route path="repair" element={<RepairPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

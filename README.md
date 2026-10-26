@@ -4,7 +4,8 @@
 
 - 落地方案：[plan.md](./plan.md)
 - 技术栈：Node 24 / pnpm workspace / TypeScript / Hono / SQLite / Playwright / React Flow
-- 当前进度：M1（DSL 内核 + 执行器 + 夹具）与 M2（画布编辑器 + 检查器 + 采集切分）已落地
+- 当前进度：M1–M5 主体已落地（DSL/执行器、画布/检查器/采集、数据/组合/矩阵、AI 受控入口、降级修复工作台）。
+  M5 的“失败现场继续（resume）”尚未实现，接口明确返回 501，不做虚假续跑。
 
 ## 包结构
 
@@ -46,6 +47,9 @@ pnpm ff matrix <flowId>
 - 定位是有序候选链，后备命中只记录 `HEALED`，不自动改写配置。
 - 唯一值由账本原子预留；数据集行与随机种子显式落库，运行可复现。
 - 采集只产出原始事件与交互簇；原始事件永不删除，切分规则版本化可重切。
+- 数据组合：pairwise / full 在编辑期生成显式数据集；运行期不做随机组合。
+- 提交后重复检测命中 409 / “已存在”时，rewind 重新生成指定变量并重跑，attempt 写入运行事件。
+- AI 默认关闭；上下文包不包含 cookies / env 值 / 密码；AI 草稿与建议必须确认并回放后才可发布。
 - API/WS 只监听 `127.0.0.1`；SQLite 仅 API 进程写。
 - Inspector 在没有 `DISPLAY` 的环境自动 headless；本地桌面可用 headed 手动登录。
 

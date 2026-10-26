@@ -10,6 +10,7 @@ import { registerAiRoutes } from "./routes/ai.js";
 import { registerFlowRoutes } from "./routes/flows.js";
 import { registerInspectorRoutes } from "./routes/inspector.js";
 import { registerRecordingRoutes } from "./routes/recordings.js";
+import { registerRepairRoutes } from "./routes/repair.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerSpecRoutes } from "./routes/spec.js";
@@ -59,6 +60,7 @@ export function createApp(deps: AppDeps): AppRuntime {
   registerSystemRoutes(app, deps);
   registerFlowRoutes(app, deps);
   registerRunRoutes(app, deps);
+  registerRepairRoutes(app, deps);
   registerInspectorRoutes(app, deps);
   registerRecordingRoutes(app, deps);
   registerSettingsRoutes(app, deps);
