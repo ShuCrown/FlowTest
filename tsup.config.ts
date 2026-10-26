@@ -38,4 +38,18 @@ export default defineConfig([
     external: ["playwright", "@faker-js/faker"],
     noExternal: ["@flowforge/dsl"],
   },
+  {
+    entry: { "inspector-entry": "packages/recorder/src/inspector-entry.ts" },
+    outDir: "packages/recorder/dist",
+    format: ["esm"],
+    target: "node24",
+    platform: "node",
+    bundle: true,
+    splitting: false,
+    sourcemap: true,
+    clean: true,
+    dts: false,
+    external: ["playwright"],
+    noExternal: ["@flowforge/dsl", "@flowforge/engine"],
+  },
 ]);

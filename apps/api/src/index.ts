@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { createDatabase, type FlowForgeDatabase } from "./db/client.js";
 import { RunBroker } from "./events.js";
 import { RunQueue } from "./queue.js";
+import { InspectorService } from "./services/inspector.js";
 import { createLedger, type LedgerService } from "./services/ledger.js";
 import { Store } from "./services/store.js";
 
@@ -12,6 +13,7 @@ export interface Runtime {
   ledger: LedgerService;
   broker: RunBroker;
   queue: RunQueue;
+  inspector: InspectorService;
   app: ReturnType<typeof createApp>["app"];
   injectWebSocket: ReturnType<typeof createApp>["injectWebSocket"];
 }
@@ -21,6 +23,7 @@ export function createRuntime(options: { dataDir?: string } = {}): Runtime {
   const store = new Store(database);
   const ledger = createLedger(database.sqlite);
   const broker = new RunBroker();
+  const inspector = new InspectorService(database.dataDir);
   const queue = new RunQueue({
     store,
     broker,
@@ -32,9 +35,10 @@ export function createRuntime(options: { dataDir?: string } = {}): Runtime {
     queue,
     broker,
     ledger,
+    inspector,
     dataDir: database.dataDir,
   });
-  return { database, store, ledger, broker, queue, app, injectWebSocket };
+  return { database, store, ledger, broker, queue, inspector, app, injectWebSocket };
 }
 
 export async function startServer(options: { port?: number; dataDir?: string } = {}): Promise<{
@@ -60,6 +64,7 @@ export async function startServer(options: { port?: number; dataDir?: string } =
   const actualPort = (server.address() as import("node:net").AddressInfo).port;
   const close = async (): Promise<void> => {
     await runtime.queue.shutdown();
+    await runtime.inspector.shutdown();
     runtime.broker.closeAll();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     runtime.database.sqlite.close();

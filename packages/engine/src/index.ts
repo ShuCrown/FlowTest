@@ -12,3 +12,5 @@ export * from "./resource-policy.js";
 export * from "./navigation.js";
 export * from "./auth.js";
 export * from "./context.js";
+export { chromium } from "playwright";
+export type { Page, Browser, BrowserContext } from "playwright";

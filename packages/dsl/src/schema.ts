@@ -291,6 +291,8 @@ export type FlowNode =
   | BranchNode
   | ApiNode;
 
+export type FlowNodeType = FlowNode["type"];
+
 export interface FlowEdge {
   from: string;
   to: string;

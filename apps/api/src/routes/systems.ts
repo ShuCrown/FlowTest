@@ -63,15 +63,29 @@ export function registerSystemRoutes(app: Hono, deps: AppDeps): void {
     return c.json({ ok: true });
   });
 
-  app.post("/api/systems/:id/session", (c) =>
-    c.json(
-      {
-        error: {
-          code: "NOT_IMPLEMENTED",
-          message: "headed 登录会话在 M2 提供",
-        },
-      },
-      501,
-    ),
-  );
+  app.post("/api/systems/:id/session", async (c) => {
+    const system = deps.store.getSystem(c.req.param("id"));
+    if (!system) throw new ApiError(404, "SYSTEM_NOT_FOUND", "系统不存在");
+    const body = (await c.req.json().catch(() => ({}))) as { headless?: boolean };
+    const session = await deps.inspector.open({
+      system,
+      headless: body.headless,
+    });
+    return c.json({ session });
+  });
+
+  app.put("/api/systems/:id/session", async (c) => {
+    const system = deps.store.getSystem(c.req.param("id"));
+    if (!system) throw new ApiError(404, "SYSTEM_NOT_FOUND", "系统不存在");
+    const path = await deps.inspector.saveStorageState(system.id);
+    const updated = deps.store.updateSystem(system.id, {
+      auth: { kind: "storageState", path },
+    });
+    return c.json({ system: updated, path });
+  });
+
+  app.delete("/api/systems/:id/session", async (c) => {
+    await deps.inspector.close();
+    return c.json({ ok: true });
+  });
 }

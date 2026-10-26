@@ -1,9 +1,14 @@
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { Hono } from "hono";
 import { createNodeWebSocket } from "@hono/node-ws";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { ZodError } from "zod";
 import type { AppDeps } from "./deps.js";
 import { ApiError } from "./lib/errors.js";
 import { registerFlowRoutes } from "./routes/flows.js";
+import { registerInspectorRoutes } from "./routes/inspector.js";
+import { registerRecordingRoutes } from "./routes/recordings.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerSpecRoutes } from "./routes/spec.js";
@@ -53,6 +58,8 @@ export function createApp(deps: AppDeps): AppRuntime {
   registerSystemRoutes(app, deps);
   registerFlowRoutes(app, deps);
   registerRunRoutes(app, deps);
+  registerInspectorRoutes(app, deps);
+  registerRecordingRoutes(app, deps);
   registerSettingsRoutes(app, deps);
   registerSpecRoutes(app, deps);
 
@@ -91,5 +98,16 @@ export function createApp(deps: AppDeps): AppRuntime {
     }),
   );
 
+  registerWebStatic(app);
   return { app, injectWebSocket };
+}
+
+export function registerWebStatic(app: Hono): void {
+  const dist = resolve(process.env.FF_WEB_DIST ?? "apps/web/dist");
+  if (!existsSync(join(dist, "index.html"))) return;
+  app.use("/assets/*", serveStatic({ root: dist }));
+  app.get("*", (c, next) => {
+    if (c.req.path.startsWith("/api")) return next();
+    return serveStatic({ path: join(dist, "index.html") })(c, next);
+  });
 }

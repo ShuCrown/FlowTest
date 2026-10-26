@@ -23,6 +23,12 @@ const batchSchema = z.object({
   headless: z.boolean().optional(),
 });
 
+const confirmSchema = z.object({
+  requestId: z.string().min(1),
+  action: z.enum(["continue", "abort"]),
+  nth: z.number().int().min(0).optional(),
+});
+
 const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -62,7 +68,8 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
     }
     const mode = body.data.mode ?? "single";
     const source = resolveRunSource(deps, flow.id, flow.dsl, mode, body.data.versionId);
-    const datasetId = body.data.datasetId ?? (mode === "single" ? firstDataset(flow.dsl) : undefined);
+    const runtimeDsl = deps.store.hydrateSystems(source.dsl);
+    const datasetId = body.data.datasetId ?? (mode === "single" ? firstDataset(runtimeDsl) : undefined);
     if (mode === "single" && !datasetId) {
       throw new ApiError(400, "DATASET_REQUIRED", "single 模式需要 datasetId");
     }
@@ -82,7 +89,7 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
         runId,
         flowId: flow.id,
         flowVersionId: source.versionId,
-        dsl: source.dsl,
+        dsl: runtimeDsl,
         mode,
         datasetId,
         artifactDir,
@@ -102,8 +109,9 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
       });
     }
     const source = resolveRunSource(deps, flow.id, flow.dsl, "matrix", body.data.versionId);
+    const runtimeDsl = deps.store.hydrateSystems(source.dsl);
     const datasetIds =
-      body.data.datasetIds ?? (flow.dsl.datasets ?? []).map((dataset) => dataset.id);
+      body.data.datasetIds ?? (runtimeDsl.datasets ?? []).map((dataset) => dataset.id);
     if (datasetIds.length === 0) {
       throw new ApiError(400, "DATASET_REQUIRED", "矩阵运行需要至少一个数据集");
     }
@@ -131,7 +139,7 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
           runId,
           flowId: flow.id,
           flowVersionId: source.versionId,
-          dsl: source.dsl,
+          dsl: runtimeDsl,
           mode: "matrix",
           datasetId,
           batchId: batch.id,
@@ -178,12 +186,22 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
     return c.json({ ok: true });
   });
 
-  app.post("/api/runs/:id/confirm", (c) =>
-    c.json(
-      { error: { code: "NOT_IMPLEMENTED", message: "探测确认在 M2 提供" } },
-      501,
-    ),
-  );
+  app.post("/api/runs/:id/confirm", async (c) => {
+    const body = confirmSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) {
+      throw new ApiError(400, "CONFIRM_INVALID", "确认请求不合法", {
+        details: body.error.issues,
+      });
+    }
+    const ok = deps.queue.confirm(c.req.param("id"), body.data.requestId, {
+      action: body.data.action,
+      nth: body.data.nth,
+    });
+    if (!ok) {
+      throw new ApiError(409, "CONFIRM_NOT_PENDING", "确认项不存在、已处理或运行已结束");
+    }
+    return c.json({ ok: true });
+  });
 
   app.post("/api/runs/:id/resume", (c) =>
     c.json(

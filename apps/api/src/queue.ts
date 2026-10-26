@@ -1,7 +1,7 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import type { FlowDsl } from "@flowforge/dsl";
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import type { FlowDsl, TargetRef } from "@flowforge/dsl";
 import type { RunResult } from "@flowforge/engine";
 import type { RunBroker } from "./events.js";
 import type { LedgerService } from "./services/ledger.js";
@@ -28,14 +28,19 @@ export interface RunJob {
   };
 }
 
-const BUILT_WORKER = fileURLToPath(
-  new URL("../../../packages/engine/dist/worker-entry.js", import.meta.url),
-);
-const DEV_WORKER = fileURLToPath(
-  new URL("../../../packages/engine/src/worker-entry.ts", import.meta.url),
-);
-const WORKER_ENTRY = existsSync(BUILT_WORKER) ? BUILT_WORKER : DEV_WORKER;
+const BUILT_WORKER = resolve(process.cwd(), "packages/engine/dist/worker-entry.js");
+const DEV_WORKER = resolve(process.cwd(), "packages/engine/src/worker-entry.ts");
+const WORKER_ENTRY = pickNewer(BUILT_WORKER, DEV_WORKER);
 const WORKER_EXEC_ARGV = WORKER_ENTRY.endsWith(".ts") ? ["--import", "tsx"] : [];
+
+function pickNewer(built: string, dev: string): string {
+  const builtExists = existsSync(built);
+  const devExists = existsSync(dev);
+  if (builtExists && devExists) {
+    return statSync(built).mtimeMs >= statSync(dev).mtimeMs ? built : dev;
+  }
+  return builtExists ? built : dev;
+}
 
 /**
  * 串行运行队列 + 懒启动 Run Worker。
@@ -89,6 +94,39 @@ export class RunQueue {
 
   activeRunId(): string | undefined {
     return this.current?.runId;
+  }
+
+  confirm(
+    runId: string,
+    requestId: string,
+    decision: { action: "continue" | "abort"; nth?: number },
+  ): boolean {
+    const row = this.deps.store.getPendingConfirm(runId, requestId);
+    if (!row) return false;
+    if (row.status !== "pending") return false;
+    const options = JSON.parse(String(row.options_json ?? "{}")) as {
+      target?: TargetRef;
+    };
+    let target: TargetRef | null = null;
+    if (decision.action === "continue") {
+      if (!this.current || this.current.runId !== runId) return false;
+      if (!options.target) return false;
+      target = {
+        ...options.target,
+        strict: true,
+        nth: decision.nth ?? 0,
+      };
+    }
+    if (decision.action === "continue" && (!this.child?.connected || !this.current)) {
+      return false;
+    }
+    this.child?.send({ type: "confirm.result", requestId, target });
+    this.deps.store.resolvePendingConfirm(
+      runId,
+      requestId,
+      decision.action === "continue" ? "confirmed" : "aborted",
+    );
+    return true;
   }
 
   async shutdown(): Promise<void> {
@@ -208,6 +246,42 @@ export class RunQueue {
       if (event.type === "run.started") {
         this.deps.store.updateRunStatus(job.runId, "running");
       }
+      this.deps.broker.publish({
+        runId: job.runId,
+        seq,
+        ts: event.ts,
+        type: event.type,
+        nodeId: event.nodeId,
+        level: event.level,
+        payload: event.payload,
+      });
+      return;
+    }
+    if (type === "needs_confirm") {
+      const request = message.request as {
+        nodeId?: string;
+        kind?: string;
+        target?: TargetRef;
+        message?: string;
+        candidates?: unknown;
+      };
+      const requestId = String(message.requestId);
+      this.deps.store.insertPendingConfirm({
+        runId: job.runId,
+        requestId,
+        nodeId: request.nodeId,
+        kind: request.kind ?? "target-ambiguous",
+        options: request,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      });
+      const event = {
+        type: "needs_confirm",
+        ts: new Date().toISOString(),
+        nodeId: request.nodeId,
+        level: "warning",
+        payload: { requestId, request },
+      };
+      const seq = this.deps.store.insertRunEvent(job.runId, event);
       this.deps.broker.publish({
         runId: job.runId,
         seq,

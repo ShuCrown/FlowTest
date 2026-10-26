@@ -526,6 +526,104 @@ export class Store {
       .all(runId, afterSeq) as Array<Record<string, unknown>>;
   }
 
+  insertPendingConfirm(input: {
+    runId: string;
+    requestId: string;
+    nodeId?: string;
+    kind: string;
+    options: unknown;
+    expiresAt: string;
+  }): number {
+    const result = this.sqlite
+      .prepare(
+        `INSERT INTO pending_confirms(run_id, request_id, node_id, kind, options_json, status, expires_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      )
+      .run(
+        input.runId,
+        input.requestId,
+        input.nodeId ?? null,
+        input.kind,
+        JSON.stringify(input.options),
+        input.expiresAt,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  getPendingConfirm(
+    runId: string,
+    requestId: string,
+  ): Record<string, unknown> | undefined {
+    return this.sqlite
+      .prepare("SELECT * FROM pending_confirms WHERE run_id=? AND request_id=?")
+      .get(runId, requestId) as Record<string, unknown> | undefined;
+  }
+
+  resolvePendingConfirm(
+    runId: string,
+    requestId: string,
+    status: "confirmed" | "aborted" | "expired",
+  ): void {
+    this.sqlite
+      .prepare("UPDATE pending_confirms SET status=? WHERE run_id=? AND request_id=?")
+      .run(status, runId, requestId);
+  }
+
+  createRecording(input: {
+    id: string;
+    systemId: string;
+    rawPath: string;
+    status: string;
+  }): void {
+    this.sqlite
+      .prepare(
+        `INSERT INTO record_sessions(id, system_id, raw_path, events_count, rule_version, status, created_at)
+         VALUES (?, ?, ?, 0, NULL, ?, ?)`,
+      )
+      .run(input.id, input.systemId, input.rawPath, input.status, new Date().toISOString());
+  }
+
+  updateRecording(
+    id: string,
+    patch: {
+      eventsCount?: number;
+      draft?: unknown;
+      ruleVersion?: string;
+      status?: string;
+    },
+  ): void {
+    const current = this.getRecording(id);
+    if (!current) return;
+    this.sqlite
+      .prepare(
+        `UPDATE record_sessions SET events_count=?, draft_dsl_json=?, rule_version=?, status=?
+         WHERE id=?`,
+      )
+      .run(
+        patch.eventsCount ?? Number(current.events_count ?? 0),
+        patch.draft === undefined
+          ? current.draft_dsl_json === null
+            ? null
+            : JSON.stringify(current.draft_dsl_json)
+          : JSON.stringify(patch.draft),
+        patch.ruleVersion ?? (current.rule_version as string | null),
+        patch.status ?? String(current.status),
+        id,
+      );
+  }
+
+  getRecording(id: string): Record<string, unknown> | undefined {
+    return this.sqlite.prepare("SELECT * FROM record_sessions WHERE id=?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+  }
+
+  listRecordings(): Array<Record<string, unknown>> {
+    return this.sqlite
+      .prepare("SELECT * FROM record_sessions ORDER BY created_at DESC")
+      .all() as Array<Record<string, unknown>>;
+  }
+
   getRunDetail(id: string): Record<string, unknown> | undefined {
     const run = this.getRun(id);
     if (!run) return undefined;
@@ -551,7 +649,21 @@ export class Store {
       events: events.map(mapRunEvent),
       actions: actions.map(mapRunAction),
       network: network.map(mapRunNetwork),
+      pendingConfirms: this.listPendingConfirms(id),
     };
+  }
+
+  listPendingConfirms(runId: string): Array<Record<string, unknown>> {
+    const rows = this.sqlite
+      .prepare("SELECT * FROM pending_confirms WHERE run_id=? AND status='pending' ORDER BY id")
+      .all(runId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      requestId: row.request_id,
+      nodeId: row.node_id,
+      kind: row.kind,
+      options: row.options_json ? JSON.parse(String(row.options_json)) : null,
+      expiresAt: row.expires_at,
+    }));
   }
 
   getSettings(): Record<string, unknown> {
@@ -559,6 +671,27 @@ export class Store {
       | { value_json: string }
       | undefined;
     return { ...DEFAULT_SETTINGS, ...(row ? JSON.parse(row.value_json) : {}) };
+  }
+
+  /** 运行时把系统表中最新的 baseUrl / 鉴权 / 跨域白名单合并进 DSL。 */
+  hydrateSystems(dsl: FlowDsl): FlowDsl {
+    return {
+      ...dsl,
+      systems: dsl.systems.map((system) => {
+        const registered = this.getSystem(system.id);
+        if (!registered) return system;
+        return {
+          ...system,
+          name: registered.name,
+          baseUrl: registered.baseUrl,
+          auth: registered.auth ?? system.auth,
+          allowedOrigins:
+            registered.allowedOrigins && registered.allowedOrigins.length > 0
+              ? registered.allowedOrigins
+              : system.allowedOrigins,
+        };
+      }),
+    };
   }
 
   patchSettings(patch: Record<string, unknown>): Record<string, unknown> {

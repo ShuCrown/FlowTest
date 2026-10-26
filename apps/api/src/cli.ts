@@ -111,6 +111,7 @@ async function main(): Promise<number> {
     }
 
     const settings = store.getSettings();
+    const runtimeDsl = store.hydrateSystems(dsl);
     const headless = !flags.has("headed");
     const baseSettings = {
       headless,
@@ -140,7 +141,7 @@ async function main(): Promise<number> {
       });
       const result = await runFlow({
         runId,
-        dsl,
+        dsl: runtimeDsl,
         mode: (flags.get("mode") as "probe" | "single") ?? "single",
         datasetId,
         settings: { ...baseSettings, artifactDir },
@@ -182,7 +183,7 @@ async function main(): Promise<number> {
       });
       const result = await runFlow({
         runId,
-        dsl,
+        dsl: runtimeDsl,
         mode: "matrix",
         datasetId,
         settings: { ...baseSettings, artifactDir },

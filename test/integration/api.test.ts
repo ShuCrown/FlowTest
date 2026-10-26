@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
+import type { FlowNode } from "@flowforge/dsl";
 import { startServer, type Runtime } from "../../apps/api/src/index.js";
-import { customerCreateFlow, resetFixture } from "../helpers/flows.js";
+import { customerCreateFlow, flowFor, resetFixture } from "../helpers/flows.js";
 import { startFixtureServer, type FixtureServerHandle } from "../../fixtures/server.mjs";
 
 let fixture: FixtureServerHandle;
@@ -173,6 +174,176 @@ test("设置读写与导入差异", async () => {
   assert.equal(imported.body.flow, undefined);
 });
 
+test("inspector：打开、试探 target、保存会话并关闭", async () => {
+  await ensureFixtureSystem();
+  const opened = await jsonRequest("/api/inspector/open", {
+    method: "POST",
+    body: JSON.stringify({ systemId: "fixture", headless: true }),
+  });
+  assert.equal(opened.status, 200, JSON.stringify(opened.body));
+  const session = opened.body.session;
+  assert.equal(session.status, "open");
+  assert.equal(session.headless, true);
+
+  const tested = await jsonRequest(`/api/inspector/${session.id}/test-target`, {
+    method: "POST",
+    body: JSON.stringify({
+      target: {
+        label: "新建客户",
+        strategies: [{ type: "role", role: "button", name: "新建客户" }],
+      },
+    }),
+  });
+  assert.equal(tested.status, 200);
+  assert.equal(tested.body.attempts[0].count, 1);
+  assert.equal(tested.body.ok, true);
+
+  const saved = await jsonRequest("/api/systems/fixture/session", { method: "PUT" });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.system.auth.kind, "storageState");
+  const stored = await stat(saved.body.path);
+  assert.equal(stored.mode & 0o777, 0o600);
+
+  await jsonRequest(`/api/inspector/${session.id}/close`, { method: "POST" });
+  const current = await jsonRequest("/api/inspector/current");
+  assert.equal(current.body.session, null);
+});
+
+test("recording：开始/停止保留原始事件文件", async () => {
+  await ensureFixtureSystem();
+  const started = await jsonRequest("/api/recordings", {
+    method: "POST",
+    body: JSON.stringify({ systemId: "fixture", headless: true }),
+  });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const recordingId = started.body.id as string;
+
+  const stopped = await jsonRequest(`/api/recordings/${recordingId}/stop`, { method: "POST" });
+  assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
+  assert.equal(stopped.body.status, "stopped");
+  assert.ok(Array.isArray(stopped.body.events));
+  assert.equal(stopped.body.ruleVersion, "segment@1");
+
+  const row = runtime.store.getRecording(recordingId);
+  assert.ok(row);
+  assert.equal(String(row.status), "stopped");
+  const raw = await readFile(String(row.raw_path), "utf8");
+  assert.equal(typeof raw, "string");
+
+  const listed = await jsonRequest("/api/recordings");
+  assert.equal(listed.body.recordings.some((item: any) => item.id === recordingId), true);
+
+  await jsonRequest("/api/inspector/current").then(async (current) => {
+    if (current.body.session) {
+      await jsonRequest(`/api/inspector/${current.body.session.id}/close`, { method: "POST" });
+    }
+  });
+});
+
+test("probe 运行遇到歧义暂停，确认后继续", async () => {
+  const nodes: FlowNode[] = [
+    {
+      id: "open",
+      type: "navigate",
+      system: "fixture",
+      url: "/customers",
+      readySignal: "page-ready",
+    },
+    {
+      id: "click-row",
+      type: "interact",
+      system: "fixture",
+      adapter: "click",
+      target: {
+        label: "客户行",
+        strategies: [{ type: "testid", value: "customer-row" }],
+      },
+    },
+  ];
+  const flow = await jsonRequest("/api/flows", {
+    method: "POST",
+    body: JSON.stringify({
+      dsl: flowFor(fixture.baseUrl, nodes, [{ from: "open", to: "click-row" }]),
+    }),
+  });
+  assert.equal(flow.status, 201, JSON.stringify(flow.body));
+  const started = await jsonRequest(`/api/flows/${flow.body.id}/runs`, {
+    method: "POST",
+    body: JSON.stringify({ mode: "probe", headless: true }),
+  });
+  assert.equal(started.status, 202, JSON.stringify(started.body));
+  const runId = started.body.id as string;
+
+  let detail: any;
+  const deadline = Date.now() + 30000;
+  do {
+    await sleep(300);
+    detail = (await jsonRequest(`/api/runs/${runId}`)).body;
+    if (detail.pendingConfirms?.length > 0) break;
+    if (["finished", "failed", "canceled"].includes(detail.status)) break;
+  } while (Date.now() < deadline);
+  assert.ok(detail.pendingConfirms?.length > 0, JSON.stringify(detail));
+  const pending = detail.pendingConfirms[0];
+
+  const confirmed = await jsonRequest(`/api/runs/${runId}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ requestId: pending.requestId, action: "continue", nth: 0 }),
+  });
+  assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
+
+  do {
+    await sleep(300);
+    detail = (await jsonRequest(`/api/runs/${runId}`)).body;
+    if (["finished", "failed", "canceled"].includes(detail.status)) break;
+  } while (Date.now() < deadline);
+  assert.equal(detail.status, "finished", JSON.stringify(detail.error));
+  const clicked = detail.nodes.find((node: any) => node.nodeId === "click-row");
+  assert.equal(clicked.status, "pass");
+  assert.ok(clicked.resolvedTarget.matchCount > 1);
+});
+
+test("运行到此节点只执行前缀，后续节点标记 skipped", async () => {
+  const flows = await jsonRequest("/api/flows");
+  const flowId = (
+    flows.body.flows as Array<{ id: string; name: string; publishedVersion: number | null }>
+  ).find((flow) => flow.name === "集成测试流程" && flow.publishedVersion)?.id;
+  assert.ok(flowId);
+  const started = await jsonRequest(`/api/flows/${flowId}/runs`, {
+    method: "POST",
+    body: JSON.stringify({ datasetId: "normal", headless: true, stopAtNodeId: "fill-name" }),
+  });
+  assert.equal(started.status, 202, JSON.stringify(started.body));
+  const runId = started.body.id as string;
+
+  let detail: any;
+  const deadline = Date.now() + 30000;
+  do {
+    await sleep(300);
+    detail = (await jsonRequest(`/api/runs/${runId}`)).body;
+    if (["finished", "failed", "canceled"].includes(detail.status)) break;
+  } while (Date.now() < deadline);
+  assert.equal(detail.status, "finished", JSON.stringify(detail.error));
+  assert.equal(detail.nodes.find((node: any) => node.nodeId === "fill-name").status, "pass");
+  assert.equal(detail.nodes.find((node: any) => node.nodeId === "fill-amount").status, "skipped");
+});
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureFixtureSystem(): Promise<void> {
+  const list = await jsonRequest("/api/systems");
+  if ((list.body.systems as Array<{ id: string }>).some((system) => system.id === "fixture")) {
+    return;
+  }
+  const created = await jsonRequest("/api/systems", {
+    method: "POST",
+    body: JSON.stringify({
+      id: "fixture",
+      name: "Fixture",
+      baseUrl: fixture.baseUrl,
+      auth: { kind: "none" },
+    }),
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
 }
