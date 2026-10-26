@@ -303,7 +303,7 @@ export function collectStructuralErrors(dsl: FlowDsl): StructuralError[] {
   }
   const systemIds = new Set(dsl.systems.map((s) => s.id));
   dsl.nodes.forEach((node, index) => {
-    if (node.type === "branch") return;
+    if (node.type === "branch" || node.type === "wait" || node.type === "assert") return;
     if (!node.system) {
       errors.push({ nodeId: node.id, path: `/nodes/${index}/system`, message: "节点缺少 system" });
     } else if (!systemIds.has(node.system)) {
@@ -320,6 +320,15 @@ export function collectStructuralErrors(dsl: FlowDsl): StructuralError[] {
     }
     if (!ids.has(edge.to)) {
       errors.push({ path: `/edges/${index}/to`, message: `边终点不存在: ${edge.to}` });
+    }
+    if (edge.when) {
+      const source = dsl.nodes.find((node) => node.id === edge.from);
+      if (source && source.type !== "branch") {
+        errors.push({
+          path: `/edges/${index}/when`,
+          message: "when 标签只允许出现在 branch 节点的出边",
+        });
+      }
     }
   });
   dsl.nodes.forEach((node, index) => {

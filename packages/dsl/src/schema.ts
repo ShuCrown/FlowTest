@@ -115,8 +115,15 @@ export type ValueExpr =
       options?: Record<string, unknown>;
     };
 
-/** 输入允许普通标量与 `{ gen: "..." }` 简写，normalize 后统一为 ValueExpr。 */
-export type ValueLike = ValueExpr | string | number | boolean | null | { gen: string };
+/** 输入允许普通标量、数组与 `{ gen: "..." }` 简写，normalize 后统一为 ValueExpr。 */
+export type ValueLike =
+  | ValueExpr
+  | string
+  | number
+  | boolean
+  | null
+  | unknown[]
+  | { gen: string };
 
 export type Condition =
   | {
@@ -425,6 +432,7 @@ export const ValueLikeSchema: z.ZodType<ValueLike> = z.union([
   z.number(),
   z.boolean(),
   z.null(),
+  z.array(z.unknown()),
   z.object({ gen: z.string().min(1) }),
 ]);
 

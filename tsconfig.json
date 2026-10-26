@@ -10,5 +10,11 @@
     },
     "types": ["node"]
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+  "include": [
+    "apps/**/*.ts",
+    "packages/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "fixtures/**/*.d.mts"
+  ]
 }
