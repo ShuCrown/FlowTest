@@ -162,7 +162,23 @@ export function RunDetailPage() {
             )}
           </div>
 
-          <SectionTitle index="02">数据表</SectionTitle>
+          <div className="mb-2 flex items-center justify-between">
+            <SectionTitle index="02">数据表</SectionTitle>
+            <div className="flex gap-1">
+              <a
+                className="ff-btn ff-btn-ghost text-[10px]"
+                href={`/api/runs/${run.id}/export?format=csv`}
+              >
+                导出 CSV
+              </a>
+              <a
+                className="ff-btn ff-btn-ghost text-[10px]"
+                href={`/api/runs/${run.id}/export?format=json`}
+              >
+                导出 JSON
+              </a>
+            </div>
+          </div>
           <div className="ff-card overflow-x-auto">
             <table className="ff-table">
               <thead>

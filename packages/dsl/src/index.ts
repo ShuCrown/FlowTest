@@ -6,3 +6,4 @@ export * from "./condition.js";
 export * from "./readiness.js";
 export * from "./lint.js";
 export * from "./diff.js";
+export * from "./pairwise.js";

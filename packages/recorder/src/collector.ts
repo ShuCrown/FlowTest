@@ -45,6 +45,7 @@ export type RawEvent =
       t: number;
       role: string;
       title?: string;
+      name?: string;
     }
   | {
       kind: "overlay-close";
@@ -235,13 +236,13 @@ export const COLLECTOR_SCRIPT = `(() => {
         const role = overlayRole(node);
         if (role) {
           openOverlays.add(node);
-          push({ kind: "overlay-open", t: now(), role, title: normalize(node.innerText || "").slice(0, 80) });
+          push({ kind: "overlay-open", t: now(), role, title: normalize(node.innerText || "").slice(0, 80), name: normalize(node.getAttribute("aria-label") || node.getAttribute("name") || "") || undefined });
         }
         for (const child of node.querySelectorAll ? node.querySelectorAll('[role=dialog],[role=menu],[role=listbox],[aria-modal=true]') : []) {
           const childRole = overlayRole(child);
           if (childRole) {
             openOverlays.add(child);
-            push({ kind: "overlay-open", t: now(), role: childRole, title: normalize(child.innerText || "").slice(0, 80) });
+            push({ kind: "overlay-open", t: now(), role: childRole, title: normalize(child.innerText || "").slice(0, 80), name: normalize(child.getAttribute("aria-label") || child.getAttribute("name") || "") || undefined });
           }
         }
       }
@@ -255,7 +256,7 @@ export const COLLECTOR_SCRIPT = `(() => {
         } else if (overlayRole(el) && !el.hidden) {
           if (!openOverlays.has(el)) {
             openOverlays.add(el);
-            push({ kind: "overlay-open", t: now(), role: overlayRole(el), title: normalize(el.innerText || "").slice(0, 80) });
+            push({ kind: "overlay-open", t: now(), role: overlayRole(el), title: normalize(el.innerText || "").slice(0, 80), name: normalize(el.getAttribute("aria-label") || el.getAttribute("name") || "") || undefined });
           }
         }
       }

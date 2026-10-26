@@ -96,6 +96,7 @@ export const ERROR_CODES = {
   browserLaunch: "BROWSER_LAUNCH_FAILED",
   navigationFailed: "NAVIGATION_FAILED",
   runCanceled: "RUN_CANCELED",
+  duplicateExhausted: "DUPLICATE_EXHAUSTED",
   notReached: "NOT_REACHED",
   contextLost: "CONTEXT_LOST",
 } as const;

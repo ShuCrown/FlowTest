@@ -156,6 +156,16 @@ export interface RecordingRow {
 export interface RecordingDetail extends RecordingRow {
   events: unknown[];
   clusters: unknown[];
+  draft?: {
+    dsl: import("@flowforge/dsl").FlowDsl;
+    report: {
+      clusters: number;
+      nodes: number;
+      needsConfirm: number;
+      confidence: number;
+      warnings: string[];
+    };
+  } | null;
 }
 
 export interface Settings {
@@ -167,6 +177,20 @@ export interface Settings {
   headless: boolean;
   retentionDays: number;
   aiEnabled: boolean;
+}
+
+export interface MatrixResponse {
+  batch: {
+    id: string;
+    flowId: string;
+    mode: string;
+    status: string;
+    datasetIds: string[];
+    summary: { total: number; passed: number; failed: number; canceled: number } | null;
+    createdAt: string;
+  } | null;
+  rows: Array<{ run: RunRow; nodes: RunNode[] }>;
+  datasets: Array<{ id: string; name: string; columns: Record<string, unknown> }>;
 }
 
 export type FlowNodeType = FlowNode["type"];

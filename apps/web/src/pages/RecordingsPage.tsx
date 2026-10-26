@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import type { FlowDsl } from "@flowforge/dsl";
 import { EmptyState, Field, PageHeader, SectionTitle, StatusBadge, toast } from "../components/ui.js";
 import { api } from "../lib/api.js";
 import type { RecordingDetail } from "../lib/types.js";
@@ -44,8 +46,19 @@ interface ClusterView {
 
 export function RecordingsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [systemId, setSystemId] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [synthesis, setSynthesis] = useState<{
+    dsl: FlowDsl;
+    report: { clusters: number; nodes: number; needsConfirm: number; confidence: number; warnings: string[] };
+  } | null>(null);
+  const [replayReport, setReplayReport] = useState<{
+    ok: boolean;
+    status: string;
+    runId: string;
+    failed: Array<{ nodeId: string; code?: string; message?: string }>;
+  } | null>(null);
 
   const systems = useQuery({ queryKey: ["systems"], queryFn: api.systems.list });
   const recordings = useQuery({
@@ -88,6 +101,40 @@ export function RecordingsPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["recording", selectedId] });
       toast("已按当前规则重新切分，原始事件未改动", "success");
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
+
+  const synthesize = useMutation({
+    mutationFn: (id: string) => api.recordings.synthesize(id),
+    onSuccess: (result) => {
+      setSynthesis({ dsl: result.dsl, report: result.report });
+      setReplayReport(null);
+      void queryClient.invalidateQueries({ queryKey: ["recording", selectedId] });
+      toast(`已合成 ${result.report.nodes} 个节点，${result.report.needsConfirm} 项待确认`, "success");
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
+
+  const replay = useMutation({
+    mutationFn: ({ id, dsl }: { id: string; dsl?: FlowDsl }) => api.recordings.replay(id, dsl),
+    onSuccess: (result) => {
+      setReplayReport({
+        ok: result.report.ok,
+        status: result.report.status,
+        runId: result.runId,
+        failed: result.report.failed,
+      });
+      toast(result.report.ok ? "回放通过" : "回放失败，查看失败节点", result.report.ok ? "success" : "error");
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
+
+  const saveDraft = useMutation({
+    mutationFn: () => api.flows.create({ dsl: synthesis!.dsl }),
+    onSuccess: (flow) => {
+      setSynthesis(null);
+      navigate(`/flows/${flow.id}`);
     },
     onError: (error: Error) => toast(error.message, "error"),
   });
@@ -177,6 +224,13 @@ export function RecordingsPage() {
                   disabled={refold.isPending}
                 >
                   重新切分
+                </button>
+                <button
+                  className="ff-btn ff-btn-primary"
+                  onClick={() => synthesize.mutate(recording.id)}
+                  disabled={synthesize.isPending || recording.status === "recording"}
+                >
+                  {synthesize.isPending ? "合成中…" : "合成 DSL 草稿"}
                 </button>
                 {recording.status === "recording" ? (
                   <button
@@ -286,6 +340,109 @@ export function RecordingsPage() {
           )}
         </div>
       </div>
+
+      {synthesis && recording ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
+          <div className="flex max-h-[90vh] w-full max-w-[1000px] flex-col border border-forge-600 bg-forge-900 shadow-2xl">
+            <div className="flex items-center gap-3 border-b border-forge-700 px-5 py-3">
+              <div>
+                <div className="ff-kicker">Synthesis / 草稿合成</div>
+                <div className="ff-display text-xl text-paper">{synthesis.dsl.meta.name}</div>
+              </div>
+              <div className="ml-auto flex gap-2">
+                <button
+                  className="ff-btn"
+                  onClick={() => replay.mutate({ id: recording.id, dsl: synthesis.dsl })}
+                  disabled={replay.isPending}
+                >
+                  {replay.isPending ? "回放中…" : "探测回放"}
+                </button>
+                <button
+                  className="ff-btn ff-btn-primary"
+                  onClick={() => saveDraft.mutate()}
+                  disabled={saveDraft.isPending}
+                >
+                  保存为新流程
+                </button>
+                <button className="ff-btn" onClick={() => setSynthesis(null)}>
+                  关闭
+                </button>
+              </div>
+            </div>
+            <div className="grid flex-1 gap-4 overflow-auto p-5 lg:grid-cols-[320px_1fr]">
+              <div className="space-y-3">
+                <div className="ff-panel p-4">
+                  <div className="ff-kicker">Report</div>
+                  <div className="mt-2 space-y-1 font-mono text-[11px] text-forge-300">
+                    <div className="flex justify-between">
+                      <span>clusters</span>
+                      <span>{synthesis.report.clusters}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>nodes</span>
+                      <span>{synthesis.report.nodes}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>needsConfirm</span>
+                      <span className="text-ember-400">{synthesis.report.needsConfirm}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>confidence</span>
+                      <span>{synthesis.report.confidence}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="ff-panel p-4">
+                  <div className="ff-kicker">Warnings</div>
+                  {synthesis.report.warnings.length === 0 ? (
+                    <p className="mt-2 font-mono text-[10px] text-forge-400">none</p>
+                  ) : (
+                    <ul className="mt-2 space-y-1 text-[11px] leading-5 text-forge-400">
+                      {synthesis.report.warnings.map((warning, index) => (
+                        <li key={index}>· {warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {replayReport ? (
+                  <div
+                    className={`border p-4 ${
+                      replayReport.ok
+                        ? "border-moss-400/50 bg-moss-400/5"
+                        : "border-rust-500/50 bg-rust-500/5"
+                    }`}
+                  >
+                    <div className="ff-kicker">
+                      Replay · {replayReport.ok ? "PASS" : "FAIL"} · {replayReport.status}
+                    </div>
+                    {replayReport.failed.length > 0 ? (
+                      <div className="mt-2 space-y-1 font-mono text-[10px] text-[#f0a58f]">
+                        {replayReport.failed.map((failure) => (
+                          <div key={failure.nodeId}>
+                            {failure.nodeId}: {failure.code ?? "FAILED"} — {failure.message ?? ""}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    <button
+                      className="ff-btn mt-3 w-full text-[10px]"
+                      onClick={() => navigate(`/runs/${replayReport.runId}`)}
+                    >
+                      查看回放运行
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-2 ff-kicker">Draft DSL</div>
+                <pre className="max-h-[62vh] overflow-auto border border-forge-700 bg-forge-950 p-3 font-mono text-[10px] leading-5 text-forge-300">
+                  {JSON.stringify(synthesis.dsl, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

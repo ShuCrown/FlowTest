@@ -1,5 +1,14 @@
 import { create } from "zustand";
-import type { FlowDsl, FlowEdge, FlowNode, FlowNodeType, SystemConfig, TargetRef } from "@flowforge/dsl";
+import type {
+  Constraint,
+  Dataset,
+  FlowDsl,
+  FlowEdge,
+  FlowNode,
+  FlowNodeType,
+  SystemConfig,
+  TargetRef,
+} from "@flowforge/dsl";
 import type { FlowDetail, Layout } from "../lib/types.js";
 
 interface Snapshot {
@@ -28,6 +37,9 @@ export interface EditorState {
   setEntry: (id: string) => void;
   setMeta: (patch: Partial<FlowDsl["meta"]>) => void;
   setDefaults: (patch: Partial<NonNullable<FlowDsl["defaults"]>>) => void;
+  setDatasets: (datasets: Dataset[]) => void;
+  setConstraints: (constraints: Constraint[]) => void;
+  setVars: (vars: Record<string, import("@flowforge/dsl").ValueLike>) => void;
   undo: () => void;
   redo: () => void;
   markSaving: (saving: boolean) => void;
@@ -163,6 +175,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!state.dsl) return;
     mutate(state, (dsl) => {
       dsl.defaults = { ...(dsl.defaults ?? {}), ...patch };
+    });
+  },
+
+  setDatasets: (datasets) => {
+    const state = get();
+    if (!state.dsl) return;
+    mutate(state, (dsl) => {
+      dsl.datasets = datasets;
+    });
+  },
+
+  setConstraints: (constraints) => {
+    const state = get();
+    if (!state.dsl) return;
+    mutate(state, (dsl) => {
+      dsl.constraints = constraints;
+    });
+  },
+
+  setVars: (vars) => {
+    const state = get();
+    if (!state.dsl) return;
+    mutate(state, (dsl) => {
+      dsl.vars = vars;
     });
   },
 

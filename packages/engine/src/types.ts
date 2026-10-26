@@ -112,6 +112,8 @@ export interface RunEvent {
     | "assert.failed"
     | "wait.timeout"
     | "api.call"
+    | "duplicate.detected"
+    | "run.rewind"
     | "run.error"
     | "warning";
   nodeId?: string;

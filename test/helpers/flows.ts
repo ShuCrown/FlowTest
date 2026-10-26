@@ -496,3 +496,182 @@ export function longPollingFlow(baseUrl: string): FlowDsl {
     datasets: [{ id: "only", name: "仅此一行", columns: {} }],
   });
 }
+
+export function regionPickerFlow(
+  baseUrl: string,
+  options: { search: string; pick: string },
+): FlowDsl {
+  const nodes: FlowNode[] = [
+    {
+      id: "open",
+      type: "navigate",
+      system: "fixture",
+      url: "/customers",
+      readySignal: "page-ready",
+    },
+    {
+      id: "wait-rows",
+      type: "wait",
+      condition: {
+        kind: "count",
+        target: { strategies: [{ type: "testid", value: "customer-row" }] },
+        min: 1,
+        timeoutMs: 5000,
+      },
+    },
+    {
+      id: "open-new",
+      type: "interact",
+      system: "fixture",
+      adapter: "click",
+      target: { strategies: [{ type: "role", role: "button", name: "新建客户" }] },
+      expect: [
+        {
+          kind: "visible",
+          target: { strategies: [{ type: "label", value: "客户名称" }] },
+        },
+      ],
+    },
+    {
+      id: "pick-region",
+      type: "picker",
+      system: "fixture",
+      mode: "dialog",
+      trigger: {
+        label: "选择区域",
+        strategies: [{ type: "role", role: "button", name: "选择区域" }],
+      },
+      panel: {
+        scope: {
+          type: "dialog",
+          name: "选择区域",
+          target: {
+            strategies: [{ type: "role", role: "dialog", name: "选择区域" }],
+          },
+        },
+        readySignal: "content-stable",
+        optionResponse: { urlContains: "/api/regions", method: "GET", status: 200 },
+      },
+      filter: {
+        steps: [
+          {
+            adapter: "input",
+            target: { strategies: [{ type: "placeholder", value: "搜索区域" }] },
+            value: { kind: "literal", value: options.search },
+          },
+        ],
+      },
+      pick: {
+        strategy: "byText",
+        byText: { value: { kind: "literal", value: options.pick }, match: "exact" },
+      },
+    },
+  ];
+  return flowFor(
+    baseUrl,
+    nodes,
+    [
+      { from: "open", to: "wait-rows" },
+      { from: "wait-rows", to: "open-new" },
+      { from: "open-new", to: "pick-region" },
+    ],
+    {
+      datasets: [{ id: "only", name: "仅此一行", columns: { search: options.search, pick: options.pick } }],
+    },
+  );
+}
+
+export function duplicateFlow(baseUrl: string): FlowDsl {
+  const nodes: FlowNode[] = [
+    {
+      id: "open",
+      type: "navigate",
+      system: "fixture",
+      url: "/customers",
+      readySignal: "page-ready",
+    },
+    {
+      id: "wait-rows",
+      type: "wait",
+      condition: {
+        kind: "count",
+        target: { strategies: [{ type: "testid", value: "customer-row" }] },
+        min: 1,
+        timeoutMs: 5000,
+      },
+    },
+    {
+      id: "open-new",
+      type: "interact",
+      system: "fixture",
+      adapter: "click",
+      target: { strategies: [{ type: "role", role: "button", name: "新建客户" }] },
+      expect: [
+        {
+          kind: "visible",
+          target: { strategies: [{ type: "label", value: "客户名称" }] },
+        },
+      ],
+    },
+    {
+      id: "fill-name",
+      type: "interact",
+      system: "fixture",
+      adapter: "input",
+      target: { strategies: [{ type: "label", value: "客户名称" }] },
+      value: { kind: "var", name: "customerName" },
+      verify: "readBack",
+    },
+    {
+      id: "save",
+      type: "interact",
+      system: "fixture",
+      adapter: "click",
+      target: { strategies: [{ type: "role", role: "button", name: "保存" }] },
+      expect: [
+        { kind: "response", urlContains: "/api/customers", method: "POST", status: 200 },
+        {
+          kind: "text",
+          target: { strategies: [{ type: "role", role: "status" }] },
+          contains: "保存成功",
+        },
+      ],
+    },
+  ];
+  return flowFor(baseUrl, nodes, [
+    { from: "open", to: "wait-rows" },
+    { from: "wait-rows", to: "open-new" },
+    { from: "open-new", to: "fill-name" },
+    { from: "fill-name", to: "save" },
+  ], {
+    defaults: {
+      nodeTimeoutMs: 15000,
+      pickerTimeoutMs: 30000,
+      screenshot: "onFailure",
+      resourcePolicy: "balanced",
+      trace: false,
+      onDuplicate: {
+        detect: [
+          { kind: "response", urlContains: "/api/customers", method: "POST", status: 409 },
+          {
+            kind: "text",
+            target: { strategies: [{ type: "role", role: "status" }] },
+            contains: "已存在",
+          },
+        ],
+        rewindTo: "fill-name",
+        regenerate: ["customerName"],
+        maxAttempts: 3,
+      },
+    },
+    vars: {
+      customerName: {
+        kind: "generator",
+        type: "unique.text",
+        scope: "fixture.customer.duplicate",
+        template: "冲突客户-{{seq.duplicate}}",
+        unique: true,
+      },
+    },
+  });
+}

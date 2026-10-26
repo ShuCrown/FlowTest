@@ -214,6 +214,8 @@ export async function runFlow(options: RunOptions): Promise<RunResult> {
 
     let current: string | undefined = plan.entry;
     const executed = new Set<string>();
+    const duplicatePolicy = dsl.defaults?.onDuplicate;
+    let duplicateAttempts = 0;
     while (current) {
       checkAbort(options.signal, current);
       if (executed.has(current)) {
@@ -280,6 +282,10 @@ export async function runFlow(options: RunOptions): Promise<RunResult> {
       const prepareStarted = Date.now();
       const pre = prepareWaits(compiled?.pre ?? [], waitCtx);
       const expect = prepareWaits(compiled?.expect ?? [], waitCtx);
+      const duplicateWaits =
+        duplicatePolicy && isDangerousClick(node)
+          ? prepareWaits(duplicatePolicy.detect, waitCtx)
+          : null;
       stageTimings.push({
         stage: "prepare",
         durationMs: Date.now() - prepareStarted,
@@ -302,16 +308,48 @@ export async function runFlow(options: RunOptions): Promise<RunResult> {
         const outcome = await executeNode(ctx, node);
 
         const expectStarted = Date.now();
+        let duplicateHit = false;
         try {
-          const expectResult = await expect.wait();
-          warnings.push(...expectResult.warnings.map((w) => `${node.id}: ${w}`));
-          if (compiled?.expect?.length) {
-            stageTimings.push({
-              stage: "expect",
-              durationMs: Date.now() - expectStarted,
-              status: "completed",
-              signal: expectResult.signalKinds.join(","),
-            });
+          if (duplicateWaits) {
+            const expectOutcome = expect
+              .wait()
+              .then((result) => ({ kind: "success" as const, result }))
+              .catch((error: unknown) => ({ kind: "error" as const, error }));
+            const duplicateOutcome = duplicateWaits
+              .wait()
+              .then(() => ({ kind: "duplicate" as const }))
+              .catch(() => ({ kind: "none" as const }));
+            const raced = await Promise.race([expectOutcome, duplicateOutcome]);
+            if (raced.kind === "duplicate") {
+              duplicateHit = true;
+            } else if (raced.kind === "success") {
+              warnings.push(...raced.result.warnings.map((w) => `${node.id}: ${w}`));
+              if (compiled?.expect?.length) {
+                stageTimings.push({
+                  stage: "expect",
+                  durationMs: Date.now() - expectStarted,
+                  status: "completed",
+                  signal: raced.result.signalKinds.join(","),
+                });
+              }
+            } else if (raced.kind === "error") {
+              throw raced.error;
+            } else {
+              const fallback = await expectOutcome;
+              if (fallback.kind === "error") throw fallback.error;
+              warnings.push(...fallback.result.warnings.map((w) => `${node.id}: ${w}`));
+            }
+          } else {
+            const expectResult = await expect.wait();
+            warnings.push(...expectResult.warnings.map((w) => `${node.id}: ${w}`));
+            if (compiled?.expect?.length) {
+              stageTimings.push({
+                stage: "expect",
+                durationMs: Date.now() - expectStarted,
+                status: "completed",
+                signal: expectResult.signalKinds.join(","),
+              });
+            }
           }
         } catch (error) {
           if (node.type === "picker") {
@@ -322,6 +360,77 @@ export async function runFlow(options: RunOptions): Promise<RunResult> {
             );
           }
           throw error;
+        }
+
+        if (duplicateHit && duplicatePolicy) {
+          duplicateAttempts += 1;
+          const usedValues: Record<string, unknown> = {};
+          for (const name of duplicatePolicy.regenerate ?? []) {
+            usedValues[name] = resolved.vars[name];
+          }
+          emit({
+            type: "duplicate.detected",
+            nodeId: node.id,
+            level: "warning",
+            payload: {
+              attempt: duplicateAttempts,
+              values: usedValues,
+              rewindTo: duplicatePolicy.rewindTo,
+            },
+          });
+          if (duplicateAttempts >= (duplicatePolicy.maxAttempts ?? 3)) {
+            throw new FlowForgeError(
+              ERROR_CODES.duplicateExhausted,
+              `重复检测已用尽 ${duplicateAttempts} 次尝试`,
+              {
+                nodeId: node.id,
+                stage: "duplicate",
+                details: { values: usedValues },
+              },
+            );
+          }
+          for (const name of duplicatePolicy.regenerate ?? []) {
+            const expr = dsl.vars?.[name];
+            if (expr === undefined) {
+              throw new FlowForgeError(
+                CODES.compileFailed,
+                `onDuplicate.regenerate 引用了未定义变量: ${name}`,
+                { nodeId: node.id },
+              );
+            }
+            dataResolver.cache.delete(`/vars/${name}`);
+            const value = await dataResolver.resolveValue(expr, `/vars/${name}`, {
+              vars: resolved.vars,
+              nodeOutputs: ctx.nodeOutputs,
+            });
+            resolved.vars[name] = value;
+          }
+          for (const key of [...dataResolver.cache.keys()]) {
+            if (key.startsWith("/nodes/")) dataResolver.cache.delete(key);
+          }
+          const downstream = reachableFrom(plan.outgoing, duplicatePolicy.rewindTo);
+          for (const nodeId of downstream) {
+            executed.delete(nodeId);
+            delete ctx.nodeOutputs[nodeId];
+          }
+          for (let i = records.length - 1; i >= 0; i -= 1) {
+            if (downstream.has(records[i]!.nodeId)) records.splice(i, 1);
+          }
+          for (let i = actions.length - 1; i >= 0; i -= 1) {
+            if (downstream.has(actions[i]!.nodeId)) actions.splice(i, 1);
+          }
+          emit({
+            type: "run.rewind",
+            nodeId: node.id,
+            level: "warning",
+            payload: {
+              attempt: duplicateAttempts,
+              rewindTo: duplicatePolicy.rewindTo,
+              regenerated: duplicatePolicy.regenerate ?? [],
+            },
+          });
+          current = duplicatePolicy.rewindTo;
+          continue;
         }
 
         record.status = healed ? "healed" : "pass";
@@ -412,6 +521,7 @@ export async function runFlow(options: RunOptions): Promise<RunResult> {
       } finally {
         pre.dispose();
         expect.dispose();
+        duplicateWaits?.dispose();
       }
     }
 
@@ -515,6 +625,35 @@ function chooseEdge(
 ): { to: string } | undefined {
   if (branch) return edges.find((edge) => edge.when === branch);
   return edges.find((edge) => !edge.when) ?? edges[0];
+}
+
+function isDangerousClick(node: FlowNode): boolean {
+  if (node.type !== "interact" || node.adapter !== "click") return false;
+  const labels = [
+    node.target.label,
+    node.name,
+    ...node.target.strategies.map((strategy) =>
+      "name" in strategy ? strategy.name : "value" in strategy ? strategy.value : undefined,
+    ),
+  ];
+  return labels.some(
+    (label) => typeof label === "string" && /保存|提交|确认|删除|发布|save|submit/i.test(label),
+  );
+}
+
+function reachableFrom(
+  outgoing: Record<string, Array<{ to: string; when?: "then" | "else" }>>,
+  start: string,
+): Set<string> {
+  const seen = new Set<string>();
+  const stack = [start];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const edge of outgoing[id] ?? []) stack.push(edge.to);
+  }
+  return seen;
 }
 
 async function captureNetwork(

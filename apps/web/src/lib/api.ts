@@ -2,6 +2,7 @@ import type {
   FlowDetail,
   FlowSummary,
   InspectorSession,
+  MatrixResponse,
   RecordingDetail,
   RecordingRow,
   RunDetail,
@@ -147,6 +148,10 @@ export const api = {
         { method: "POST", body: JSON.stringify(body) },
       ),
     cancel: (id: string) => request<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+    matrix: (flowId: string, batchId?: string) =>
+      request<MatrixResponse>(
+        `/api/flows/${flowId}/matrix${batchId ? `?batchId=${batchId}` : ""}`,
+      ),
     confirm: (id: string, body: { requestId: string; action: "continue" | "abort"; nth?: number }) =>
       request<{ ok: boolean }>(`/api/runs/${id}/confirm`, {
         method: "POST",
@@ -190,6 +195,34 @@ export const api = {
         { method: "POST" },
       ),
     get: (id: string) => request<RecordingDetail>(`/api/recordings/${id}`),
+    synthesize: (id: string) =>
+      request<{
+        dsl: FlowDsl;
+        report: {
+          clusters: number;
+          nodes: number;
+          needsConfirm: number;
+          confidence: number;
+          warnings: string[];
+        };
+        clusters: unknown[];
+        ruleVersion: string;
+      }>(`/api/recordings/${id}/synthesize`, { method: "POST" }),
+    replay: (id: string, dsl?: FlowDsl) =>
+      request<{
+        runId: string;
+        draft: FlowDsl;
+        report: {
+          ok: boolean;
+          status: string;
+          nodeCount: number;
+          failed: Array<{ nodeId: string; code?: string; message?: string }>;
+          mismatches: Array<{ nodeId: string; reason: string }>;
+        };
+      }>(`/api/recordings/${id}/replay`, {
+        method: "POST",
+        body: JSON.stringify(dsl ? { dsl } : {}),
+      }),
     refold: (id: string) =>
       request<{ clusters: unknown[]; ruleVersion: string }>(`/api/recordings/${id}/refold`, {
         method: "POST",

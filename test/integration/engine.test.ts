@@ -8,9 +8,11 @@ import { MemoryLedger } from "../helpers/ledger.js";
 import {
   branchFlow,
   customerCreateFlow,
+  duplicateFlow,
   filterFlow,
   longPollingFlow,
   missingTargetFlow,
+  regionPickerFlow,
   resetFixture,
   settingsFor,
   tempArtifactDir,
@@ -177,6 +179,63 @@ test("定位失败输出截图、ARIA 快照与相似元素", async () => {
   assert.ok(failure.nodes);
   const aria = await readFile(join(artifactDir, "failure-click-missing.yml"), "utf8").catch(() => "");
   assert.ok(aria.length > 0);
+});
+
+test("提交后重复检测：rewind 重新生成唯一值并重跑", async () => {
+  await resetFixture(fixture.baseUrl);
+  await fetch(`${fixture.baseUrl}/api/customers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "冲突客户-1", regions: ["华东区"], amount: 100 }),
+  });
+  const ledger = new MemoryLedger();
+  const { events, onEvent } = collectEvents();
+  const result = await runFlow({
+    runId: "run_duplicate",
+    dsl: duplicateFlow(fixture.baseUrl),
+    mode: "single",
+    settings: settingsFor(await tempArtifactDir()),
+    ledger,
+    onEvent,
+  });
+  assert.equal(result.status, "finished", JSON.stringify(result.error));
+  assert.equal(result.resolvedData.vars.customerName, "冲突客户-2");
+  assert.equal(events.filter((event) => event.type === "duplicate.detected").length, 1);
+  assert.equal(events.filter((event) => event.type === "run.rewind").length, 1);
+  const customers = (await (await fetch(`${fixture.baseUrl}/api/customers`)).json()) as Array<{
+    name: string;
+  }>;
+  assert.equal(customers.some((customer) => customer.name === "冲突客户-2"), true);
+  assert.equal(customers.filter((customer) => customer.name === "冲突客户-1").length, 1);
+  const save = result.nodes.find((node) => node.nodeId === "save");
+  assert.equal(save?.status, "pass");
+});
+
+test("picker 负向用例：筛选无结果 / 选项不存在使用明确错误码", async () => {
+  await resetFixture(fixture.baseUrl);
+  const filterResult = await runFlow({
+    runId: "run_negative_filter",
+    dsl: regionPickerFlow(fixture.baseUrl, { search: "不存在", pick: "华东区" }),
+    mode: "single",
+    datasetId: "only",
+    settings: settingsFor(await tempArtifactDir()),
+    ledger: new MemoryLedger(),
+  });
+  assert.equal(filterResult.status, "failed");
+  assert.equal(filterResult.error?.code, "FILTER_NO_RESULT");
+
+  const pickResult = await runFlow({
+    runId: "run_negative_pick",
+    dsl: regionPickerFlow(fixture.baseUrl, { search: "华", pick: "不存在区域" }),
+    mode: "single",
+    datasetId: "only",
+    settings: settingsFor(await tempArtifactDir()),
+    ledger: new MemoryLedger(),
+  });
+  assert.equal(pickResult.status, "failed");
+  assert.equal(pickResult.error?.code, "PICK_NO_MATCH");
+  const details = pickResult.error?.details as { candidates?: string[] } | undefined;
+  assert.ok(details?.candidates && details.candidates.length > 0);
 });
 
 test("长轮询页 domStable 最迟 8s 放行，不因 idle 卡死", async () => {

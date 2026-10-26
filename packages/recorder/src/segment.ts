@@ -11,7 +11,7 @@ export interface InteractionCluster {
   endT: number;
   mode?: "inline" | "dialog";
   trigger?: { fp: ElementFingerprint; target: TargetRef };
-  panel?: { role: string; title?: string };
+  panel?: { role: string; title?: string; name?: string };
   filters: Array<{
     kind: string;
     fp: ElementFingerprint;
@@ -210,7 +210,7 @@ function buildPickerCluster(
     endT,
     mode: open.role === "listbox" || open.role === "menu" ? "inline" : "dialog",
     trigger: { fp: click.fp, target: fingerprintToTarget(click.fp) },
-    panel: { role: open.role, title: open.title },
+    panel: { role: open.role, title: open.title, name: open.name },
     filters,
     picks,
     commit,

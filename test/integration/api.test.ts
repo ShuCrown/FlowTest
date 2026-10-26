@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -11,6 +11,7 @@ import { startFixtureServer, type FixtureServerHandle } from "../../fixtures/ser
 let fixture: FixtureServerHandle;
 let api: Awaited<ReturnType<typeof startServer>>;
 let runtime: Runtime;
+let mainRunId = "";
 
 before(async () => {
   fixture = await startFixtureServer();
@@ -87,6 +88,7 @@ test("系统与流程 CRUD、发布版本、运行 worker 全链路", async () =
   });
   assert.equal(started.status, 202, JSON.stringify(started.body));
   const runId = started.body.id as string;
+  mainRunId = runId;
 
   let detail: any;
   const deadline = Date.now() + 30000;
@@ -108,6 +110,14 @@ test("系统与流程 CRUD、发布版本、运行 worker 全链路", async () =
 
   const compiled = await fetch(`${api.url}/api/runs/${runId}/artifacts/compiled-plan.json`);
   assert.equal(compiled.status, 200);
+
+  const csv = await fetch(`${api.url}/api/runs/${runId}/export?format=csv`);
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get("content-type") ?? "", /text\/csv/);
+  assert.match(await csv.text(), /客户名称/);
+  const exportedData = await (await fetch(`${api.url}/api/runs/${runId}/export?format=json`)).json();
+  assert.equal(exportedData.runId, runId);
+  assert.ok(exportedData.rows.length > 0);
 
   const ws = new WebSocket(`ws://127.0.0.1:${new URL(api.url).port}/api/runs/${runId}/events`);
   const snapshot = await new Promise<any>((resolve, reject) => {
@@ -151,6 +161,71 @@ test("矩阵批次串行运行两个数据集", async () => {
   assert.equal(response.body.runs.length, 2);
   assert.ok(response.body.runs.every((run: any) => run.status === "finished"));
   assert.equal(response.body.summary.passed, 2);
+
+  const matrix = await jsonRequest(`/api/flows/${flowId}/matrix`);
+  assert.equal(matrix.status, 200);
+  assert.equal(matrix.body.batch.id, batchId);
+  assert.equal(matrix.body.rows.length, 2);
+  assert.ok(matrix.body.rows.every((row: any) => row.nodes.length > 0));
+});
+
+test("pairwise 预览与应用写入显式数据集", async () => {
+  const flow = await jsonRequest("/api/flows", {
+    method: "POST",
+    body: JSON.stringify({
+      dsl: flowFor(
+        fixture.baseUrl,
+        [
+          {
+            id: "open",
+            type: "navigate",
+            system: "fixture",
+            url: "/customers",
+            readySignal: "page-ready",
+          },
+        ],
+        [],
+      ),
+    }),
+  });
+  assert.equal(flow.status, 201, JSON.stringify(flow.body));
+  const flowId = flow.body.id as string;
+  const factors = {
+    region: ["华东区", "华南区", "华北区"],
+    status: ["启用", "停用"],
+    type: ["普通", "VIP"],
+    channel: ["线上", "线下"],
+  };
+  const preview = await jsonRequest(`/api/flows/${flowId}/matrix/preview`, {
+    method: "POST",
+    body: JSON.stringify({ mode: "pairwise", factors, seed: 7 }),
+  });
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  assert.equal(preview.body.pairCoverage.ratio, 1);
+  assert.ok(preview.body.count < 3 * 2 * 2 * 2);
+  assert.equal(preview.body.generatedBy, "pairwise@1");
+
+  const applied = await jsonRequest(`/api/flows/${flowId}/matrix/generate`, {
+    method: "POST",
+    body: JSON.stringify({ mode: "pairwise", factors, seed: 7 }),
+  });
+  assert.equal(applied.status, 200, JSON.stringify(applied.body));
+  assert.equal(applied.body.flow.dsl.datasets.length, preview.body.count);
+  assert.equal(applied.body.flow.dsl.datasets[0].meta.generatedBy, "pairwise@1");
+  const reread = await jsonRequest(`/api/flows/${flowId}`);
+  assert.equal(reread.body.dsl.datasets.length, preview.body.count);
+  assert.equal(reread.body.dsl.datasets[0].meta.seed, 7);
+});
+
+test("运行数据导出 CSV / JSON", async () => {
+  assert.ok(mainRunId);
+  const csv = await fetch(`${api.url}/api/runs/${mainRunId}/export?format=csv`);
+  assert.equal(csv.status, 200);
+  assert.match(await csv.text(), /node_id,field/);
+  const json = await fetch(`${api.url}/api/runs/${mainRunId}/export?format=json`);
+  assert.equal(json.status, 200);
+  const payload = (await json.json()) as { rows: unknown[] };
+  assert.ok(payload.rows.length > 0);
 });
 
 test("设置读写与导入差异", async () => {
@@ -229,6 +304,60 @@ test("recording：开始/停止保留原始事件文件", async () => {
   assert.equal(String(row.status), "stopped");
   const raw = await readFile(String(row.raw_path), "utf8");
   assert.equal(typeof raw, "string");
+
+  // 注入一份可重放的合成事件，验证采集 → 合成 → 回放闭环
+  const synthetic = [
+    {
+      kind: "navigate",
+      ts: new Date().toISOString(),
+      url: `${fixture.baseUrl}/customers`,
+      source: "playwright",
+    },
+    {
+      kind: "click",
+      t: 100,
+      fp: {
+        tag: "button",
+        role: "button",
+        text: "新建客户",
+        testid: "customer-new",
+        css: "button#new-customer",
+        xpath: "//button[1]",
+      },
+    },
+    {
+      kind: "click",
+      t: 900,
+      fp: {
+        tag: "button",
+        role: "button",
+        text: "取消",
+        css: "button#new-cancel",
+        xpath: "//button[2]",
+      },
+    },
+  ];
+  await writeFile(String(row.raw_path), synthetic.map((event) => JSON.stringify(event)).join("\n"));
+
+  const synthesized = await jsonRequest(`/api/recordings/${recordingId}/synthesize`, {
+    method: "POST",
+  });
+  assert.equal(synthesized.status, 200, JSON.stringify(synthesized.body));
+  assert.equal(synthesized.body.report.nodes, 3);
+  assert.equal(synthesized.body.dsl.nodes.length, 3);
+  assert.equal(synthesized.body.dsl.nodes[0].type, "navigate");
+  assert.equal(synthesized.body.dsl.nodes[1].type, "interact");
+
+  const replay = await jsonRequest(`/api/recordings/${recordingId}/replay`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  assert.equal(replay.status, 200, JSON.stringify(replay.body));
+  assert.equal(replay.body.report.ok, true, JSON.stringify(replay.body.report.failed));
+  assert.ok(replay.body.runId);
+  const replayRun = await jsonRequest(`/api/runs/${replay.body.runId}`);
+  assert.equal(replayRun.body.status, "finished");
+  assert.ok(replayRun.body.nodes.length >= 3);
 
   const listed = await jsonRequest("/api/recordings");
   assert.equal(listed.body.recordings.some((item: any) => item.id === recordingId), true);

@@ -210,6 +210,78 @@ export function registerRunRoutes(app: Hono, deps: AppDeps): void {
     ),
   );
 
+  app.get("/api/flows/:id/matrix", (c) => {
+    const flowId = c.req.param("id");
+    const flow = deps.store.getFlow(flowId);
+    if (!flow) throw new ApiError(404, "FLOW_NOT_FOUND", "流程不存在");
+    const batchId = c.req.query("batchId");
+    const row = batchId
+      ? (deps.store.sqlite.prepare("SELECT * FROM run_batches WHERE id=? AND flow_id=?").get(batchId, flowId) as
+          | Record<string, unknown>
+          | undefined)
+      : (deps.store.sqlite
+          .prepare("SELECT * FROM run_batches WHERE flow_id=? ORDER BY created_at DESC LIMIT 1")
+          .get(flowId) as Record<string, unknown> | undefined);
+    if (!row) return c.json({ batch: null, rows: [], datasets: flow.dsl.datasets ?? [] });
+    const runs = deps.store.listRuns({ batchId: String(row.id), limit: 500 });
+    const rows = runs.map((run) => {
+      const detail = deps.store.getRunDetail(run.id) as {
+        nodes?: Array<Record<string, unknown>>;
+      };
+      return { run, nodes: detail?.nodes ?? [] };
+    });
+    return c.json({
+      batch: {
+        id: row.id,
+        flowId: row.flow_id,
+        mode: row.mode,
+        status: row.status,
+        datasetIds: JSON.parse(String(row.dataset_ids_json)),
+        summary: row.summary_json ? JSON.parse(String(row.summary_json)) : null,
+        createdAt: row.created_at,
+      },
+      rows,
+      datasets: flow.dsl.datasets ?? [],
+    });
+  });
+
+  app.get("/api/runs/:id/export", (c) => {
+    const run = deps.store.getRun(c.req.param("id"));
+    if (!run) throw new ApiError(404, "RUN_NOT_FOUND", "运行不存在");
+    const detail = deps.store.getRunDetail(run.id) as {
+      actions?: Array<{
+        nodeId: string;
+        field: string;
+        expected: unknown;
+        actual: unknown;
+        valueSource: string | null;
+        status: string;
+        durationMs: number;
+      }>;
+    };
+    const rows = detail.actions ?? [];
+    const format = c.req.query("format") ?? "json";
+    if (format === "csv") {
+      const header = "node_id,field,expected,actual,source,status,duration_ms";
+      const lines = rows.map((row) =>
+        [
+          row.nodeId,
+          row.field,
+          csv(row.expected),
+          csv(row.actual),
+          row.valueSource ?? "",
+          row.status,
+          row.durationMs,
+        ].join(","),
+      );
+      c.header("content-type", "text/csv; charset=utf-8");
+      c.header("content-disposition", `attachment; filename="${run.id}-data.csv"`);
+      return c.body(`\uFEFF${header}\n${lines.join("\n")}`);
+    }
+    c.header("content-disposition", `attachment; filename="${run.id}-data.json"`);
+    return c.json({ runId: run.id, datasetId: run.datasetId, rows });
+  });
+
   app.get("/api/runs/:id/artifacts/*", async (c) => {
     const run = deps.store.getRun(c.req.param("id"));
     if (!run?.artifactDir) throw new ApiError(404, "RUN_NOT_FOUND", "运行不存在");
@@ -256,6 +328,11 @@ function resolveRunSource(
 
 function firstDataset(dsl: FlowDsl): string | undefined {
   return dsl.datasets?.[0]?.id;
+}
+
+function csv(value: unknown): string {
+  const text = value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function buildJob(

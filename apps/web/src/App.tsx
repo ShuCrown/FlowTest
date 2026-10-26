@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Shell } from "./Shell.js";
 import { EditorPage } from "./pages/EditorPage.js";
 import { FlowsPage } from "./pages/FlowsPage.js";
+import { MatrixPage } from "./pages/MatrixPage.js";
 import { RecordingsPage } from "./pages/RecordingsPage.js";
 import { RunDetailPage } from "./pages/RunDetailPage.js";
 import { RunsPage } from "./pages/RunsPage.js";
@@ -15,6 +16,7 @@ export function App() {
         <Route index element={<FlowsPage />} />
         <Route path="systems" element={<SystemsPage />} />
         <Route path="flows/:id" element={<EditorPage />} />
+        <Route path="flows/:id/matrix" element={<MatrixPage />} />
         <Route path="runs" element={<RunsPage />} />
         <Route path="runs/:id" element={<RunDetailPage />} />
         <Route path="recordings" element={<RecordingsPage />} />

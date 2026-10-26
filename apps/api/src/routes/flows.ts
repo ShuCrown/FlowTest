@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Hono } from "hono";
-import { diffDsl } from "@flowforge/dsl";
+import { diffDsl, generateMatrix, type Dataset, type FlowDsl, type ValueLike } from "@flowforge/dsl";
 import type { AppDeps } from "../deps.js";
 import { ApiError } from "../lib/errors.js";
 import { validateDsl } from "../services/store.js";
@@ -143,27 +143,70 @@ export function registerFlowRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/flows/:id/matrix/preview", async (c) => {
     const flow = deps.store.getFlow(c.req.param("id"));
     if (!flow) throw new ApiError(404, "FLOW_NOT_FOUND", "流程不存在");
-    const body = (await c.req.json().catch(() => ({}))) as {
-      mode?: "full" | "pairwise";
-      factors?: Record<string, unknown[]>;
-      seed?: number;
-    };
-    const factors = body.factors ?? factorsFromDatasets(flow.dsl.datasets ?? []);
-    if (body.mode === "pairwise") {
-      throw new ApiError(
-        501,
-        "PAIRWISE_NOT_IMPLEMENTED",
-        "pairwise 生成器在 M3 实现；当前可用 full 预览",
-      );
-    }
-    const rows = fullCombinations(factors);
-    if (rows.length > 500) {
-      throw new ApiError(400, "MATRIX_TOO_LARGE", "full 组合超过 500 行", {
-        details: { rows: rows.length },
-      });
-    }
-    return c.json({ mode: "full", rows, count: rows.length, factors: Object.keys(factors) });
+    const body = await readMatrixBody(c);
+    return c.json(runMatrix(flow.dsl, body));
   });
+
+  app.post("/api/flows/:id/matrix/generate", async (c) => {
+    const flow = deps.store.getFlow(c.req.param("id"));
+    if (!flow) throw new ApiError(404, "FLOW_NOT_FOUND", "流程不存在");
+    const body = await readMatrixBody(c);
+    const result = runMatrix(flow.dsl, body);
+    const datasets: Dataset[] = result.rows.map((row, index) => ({
+      id: `matrix-${index + 1}`,
+      name: `组合 ${index + 1}`,
+      columns: row as Record<string, ValueLike>,
+      meta: {
+        generatedBy: result.generatedBy,
+        seed: result.seed,
+        pairCoverage: result.pairCoverage,
+      },
+    }));
+    const updated = deps.store.updateFlow(flow.id, {
+      dsl: { ...flow.dsl, datasets },
+    });
+    return c.json({ flow: updated, matrix: result });
+  });
+}
+
+async function readMatrixBody(c: {
+  req: { json: () => Promise<unknown> };
+}): Promise<{
+  mode?: "full" | "pairwise";
+  factors?: Record<string, unknown[]>;
+  mandatoryRows?: Array<Record<string, unknown>>;
+  seed?: number;
+  maxRows?: number;
+}> {
+  const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (raw.factors !== undefined && (typeof raw.factors !== "object" || raw.factors === null)) {
+    throw new ApiError(400, "MATRIX_INVALID", "factors 必须是对象");
+  }
+  return raw as never;
+}
+
+function runMatrix(
+  dsl: FlowDsl,
+  body: {
+    mode?: "full" | "pairwise";
+    factors?: Record<string, unknown[]>;
+    mandatoryRows?: Array<Record<string, unknown>>;
+    seed?: number;
+    maxRows?: number;
+  },
+): ReturnType<typeof generateMatrix> {
+  const factors = body.factors ?? factorsFromDatasets(dsl.datasets ?? []);
+  try {
+    return generateMatrix({
+      mode: body.mode ?? "full",
+      factors,
+      mandatoryRows: body.mandatoryRows,
+      seed: body.seed,
+      maxRows: body.maxRows,
+    });
+  } catch (error) {
+    throw new ApiError(400, "MATRIX_INVALID", (error as Error).message);
+  }
 }
 
 function validationResponse(input: unknown): Record<string, unknown> {
@@ -192,21 +235,4 @@ function factorsFromDatasets(
     }
   }
   return factors;
-}
-
-function fullCombinations(factors: Record<string, unknown[]>): Array<Record<string, unknown>> {
-  const keys = Object.keys(factors);
-  if (keys.length === 0) return [];
-  let rows: Array<Record<string, unknown>> = [{}];
-  for (const key of keys) {
-    const next: Array<Record<string, unknown>> = [];
-    for (const row of rows) {
-      for (const value of factors[key] ?? []) {
-        next.push({ ...row, [key]: value });
-      }
-    }
-    rows = next;
-    if (rows.length > 500) return rows;
-  }
-  return rows;
 }

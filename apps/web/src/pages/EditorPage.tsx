@@ -6,6 +6,7 @@ import { FlowCanvas } from "../flow/Canvas.js";
 import { autoLayout } from "../flow/layout.js";
 import { createDefaultNode, NODE_TITLES, useEditorStore } from "../flow/store.js";
 import { NodeInspector } from "../components/NodeInspector.js";
+import { DatasetEditor } from "../components/DatasetEditor.js";
 import {
   EmptyState,
   Field,
@@ -308,6 +309,9 @@ export function EditorPage() {
         <button className="ff-btn" onClick={publish} disabled={publishing}>
           {publishing ? "发布中…" : "发布版本"}
         </button>
+        <Link className="ff-btn" to={`/flows/${flow.id}/matrix`}>
+          矩阵
+        </Link>
         <span className="ml-auto flex items-center gap-2">
           {lintErrors > 0 ? (
             <span className="ff-badge ff-badge-bad">{lintErrors} lint errors</span>
@@ -428,6 +432,7 @@ function FlowInspector({
 }) {
   const setMeta = useEditorStore((state) => state.setMeta);
   const setDefaults = useEditorStore((state) => state.setDefaults);
+  const [showData, setShowData] = useState(false);
   return (
     <div className="space-y-5">
       <div>
@@ -516,6 +521,9 @@ function FlowInspector({
         </Field>
       </div>
       <SectionTitle index="03">数据集</SectionTitle>
+      <button className="ff-btn mb-2 w-full" onClick={() => setShowData(true)}>
+        打开数据工坊 · 数据集 / 约束 / 组合
+      </button>
       {(dsl.datasets ?? []).length === 0 ? (
         <p className="text-[12px] text-forge-400">尚无数据集；只能 probe 运行，或使用流程变量与字面值。</p>
       ) : (
@@ -548,6 +556,7 @@ function FlowInspector({
         <div className="ff-kicker">flow id</div>
         <div className="mt-1 break-all font-mono text-[10px] text-forge-400">{flow.id}</div>
       </div>
+      {showData ? <DatasetEditor onClose={() => setShowData(false)} /> : null}
     </div>
   );
 }
