@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flowforge/dsl": ["packages/dsl/src/index.ts"],
+      "@flowforge/engine": ["packages/engine/src/index.ts"],
+      "@flowforge/recorder": ["packages/recorder/src/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["apps/**/*.ts", "packages/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
+}

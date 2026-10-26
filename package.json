@@ -1,0 +1,31 @@
+{
+  "name": "flowforge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.5.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/unit/**/*.test.ts\" \"test/integration/**/*.test.ts\"",
+    "test:unit": "node --import tsx --test \"test/unit/**/*.test.ts\"",
+    "test:integration": "node --import tsx --test \"test/integration/**/*.test.ts\"",
+    "test:perf": "node --import tsx --test \"test/perf/**/*.test.ts\"",
+    "test:e2e": "node --import tsx --test \"test/e2e/**/*.test.ts\"",
+    "db:migrate": "tsx apps/api/src/db/migrate.ts",
+    "build": "tsup",
+    "start": "node apps/api/dist/index.js",
+    "ff": "tsx apps/api/src/cli.ts",
+    "fixtures": "node fixtures/server.mjs"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.6.0",
+    "tsx": "^4.23.15",
+    "tsup": "^9.0.0",
+    "typescript": "^5.9.3"
+  }
+}
