@@ -1,7 +1,7 @@
 import type { BrowserContext } from "playwright";
 import type { ResourcePolicy } from "./types.js";
 
-const ANALYTICS = /google-analytics|googletagmanager|doubleclick|hotjar|segment\.(io|com)|mixpanel|sentry\.io|clarity\.ms|matomo/i;
+const ANALYTICS = /google-analytics|googletagmanager|doubleclick|hotjar|segment\.(io|com)|mixpanel|sentry\.io|clarity\.ms|matomo|analytics\.js/i;
 const MEDIA = /\.(mp4|webm|mp3|ogg|wav)(\?|$)/i;
 const IMAGES = /\.(png|jpe?g|gif|webp|svg|ico|bmp|avif)(\?|$)/i;
 const FONTS = /\.(woff2?|ttf|otf|eot)(\?|$)/i;

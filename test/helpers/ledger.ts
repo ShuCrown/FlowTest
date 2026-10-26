@@ -4,7 +4,7 @@ export class MemoryLedger implements Ledger {
   private readonly values = new Set<string>();
   private readonly sequences = new Map<string, number>();
 
-  async reserve(systemId: string, scope: string, value: string): Promise<boolean> {
+  async reserve(systemId: string, scope: string, value: string, _runId?: string): Promise<boolean> {
     const key = `${systemId}|${scope}|${value}`;
     if (this.values.has(key)) return false;
     this.values.add(key);

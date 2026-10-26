@@ -206,7 +206,7 @@ export function customerCreateFlow(baseUrl: string): FlowDsl {
       {
         id: "large",
         name: "大额",
-        columns: { amount: 5000, regionSearch: "华", regions: ["华南区"] },
+        columns: { amount: 5000, regionSearch: "华", regions: ["华东区", "华南区"] },
       },
     ],
     constraints: [{ type: "range", field: "amount", min: 0, max: 100000 }],

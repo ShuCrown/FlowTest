@@ -54,29 +54,44 @@ export function normalizeValue(input: ValueLike, pointer = ""): ValueExpr {
     return input as ValueExpr;
   }
   if (typeof obj.gen === "string") {
-    return normalizeGenerator(obj.gen, pointer);
+    return normalizeGenerator(obj.gen, pointer, obj);
   }
   return { kind: "literal", value: obj };
 }
 
-export function normalizeGenerator(gen: string, pointer = ""): ValueExpr {
+export function normalizeGenerator(
+  gen: string,
+  pointer = "",
+  extra: Record<string, unknown> = {},
+): ValueExpr {
   const [family, ...rest] = gen.split(".");
   const suffix = rest.join(".");
+  const shared = {
+    ...(typeof extra.scope === "string" ? { scope: extra.scope } : {}),
+    ...(typeof extra.template === "string" ? { template: extra.template } : {}),
+    ...(typeof extra.unique === "boolean" ? { unique: extra.unique } : {}),
+    ...(extra.options && typeof extra.options === "object"
+      ? { options: extra.options as Record<string, unknown> }
+      : {}),
+  };
   if (UNIQUE_GENERATORS.has(gen)) {
     return {
       kind: "generator",
       type: gen as "unique.text" | "unique.email" | "unique.phone" | "unique.orderNo",
       unique: true,
+      ...shared,
     };
   }
   if (FAKER_GENERATORS.has(gen)) {
     return {
       kind: "generator",
       type: gen as "faker.name" | "faker.email" | "faker.phone" | "faker.company" | "faker.idCard",
+      ...shared,
     };
   }
   if (family === "sequence" && suffix) {
-    return { kind: "generator", type: "sequence", scope: suffix };
+    const scope = typeof extra.scope === "string" ? extra.scope : suffix;
+    return { kind: "generator", type: "sequence", scope, ...shared };
   }
   throw new DslNormalizeError(`未知取值生成器: ${gen}`, pointer);
 }
