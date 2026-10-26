@@ -236,6 +236,49 @@ export const api = {
         body: JSON.stringify(patch),
       }).then((r) => r.settings),
   },
+  ai: {
+    context: (flowId?: string) =>
+      request<{ context: Record<string, unknown> }>(
+        `/api/ai/context${flowId ? `?flowId=${flowId}` : ""}`,
+      ).then((r) => r.context),
+    draft: (description: string, flowId?: string) =>
+      request<{
+        dsl: FlowDsl;
+        readiness: { level: number };
+        diff: unknown[];
+        needsConfirm: boolean;
+        applied: boolean;
+      }>("/api/ai/draft", {
+        method: "POST",
+        body: JSON.stringify({ description, flowId }),
+      }),
+    suggest: (kind: "field" | "condition", text: string, flowId?: string) =>
+      request<{
+        suggestion: unknown;
+        confidence: number;
+        needsConfirm: boolean;
+        source: string;
+      }>("/api/ai/suggest", {
+        method: "POST",
+        body: JSON.stringify({ kind, text, flowId }),
+      }),
+  },
+  templates: {
+    search: (query: string) =>
+      request<{
+        templates: Array<{
+          score: number;
+          flow: {
+            id: string;
+            name: string;
+            tags: string[];
+            readiness: number;
+            publishedVersion: number | null;
+            dsl: FlowDsl;
+          };
+        }>;
+      }>(`/api/templates/search?q=${encodeURIComponent(query)}`),
+  },
   health: () =>
     request<{
       ok: boolean;

@@ -217,6 +217,42 @@ test("pairwise 预览与应用写入显式数据集", async () => {
   assert.equal(reread.body.dsl.datasets[0].meta.seed, 7);
 });
 
+test("AI 默认关闭、上下文包与模板检索可用", async () => {
+  const flows = await jsonRequest("/api/flows");
+  const mainFlow = (
+    flows.body.flows as Array<{ id: string; name: string; publishedVersion: number | null }>
+  ).find((flow) => flow.name === "集成测试流程" && flow.publishedVersion);
+  assert.ok(mainFlow);
+
+  const context = await jsonRequest(`/api/ai/context?flowId=${mainFlow.id}`);
+  assert.equal(context.status, 200);
+  assert.ok(context.body.context.systems.length >= 1);
+  assert.ok(context.body.context.schema);
+  const contextText = JSON.stringify(context.body.context);
+  assert.equal(contextText.includes("FF_AI_API_KEY"), false);
+  assert.equal(contextText.includes("storageState.json"), false);
+
+  const draft = await jsonRequest("/api/ai/draft", {
+    method: "POST",
+    body: JSON.stringify({ description: "创建一个 CRM 建档流程" }),
+  });
+  assert.equal(draft.status, 400);
+  assert.equal(draft.body.error.code, "AI_DISABLED");
+
+  const suggest = await jsonRequest("/api/ai/suggest", {
+    method: "POST",
+    body: JSON.stringify({ kind: "field", text: "客户名称" }),
+  });
+  assert.equal(suggest.status, 400);
+  assert.equal(suggest.body.error.code, "AI_DISABLED");
+
+  const templates = await jsonRequest("/api/templates/search?q=集成");
+  assert.equal(templates.status, 200);
+  assert.ok(templates.body.templates.length >= 1);
+  assert.equal(templates.body.templates[0].flow.name, "集成测试流程");
+  assert.ok(templates.body.templates[0].flow.dsl);
+});
+
 test("运行数据导出 CSV / JSON", async () => {
   assert.ok(mainRunId);
   const csv = await fetch(`${api.url}/api/runs/${mainRunId}/export?format=csv`);

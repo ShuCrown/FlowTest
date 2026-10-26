@@ -17,12 +17,49 @@ export function FlowsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showAiContext, setShowAiContext] = useState(false);
+  const [aiContext, setAiContext] = useState("");
+  const [aiDescription, setAiDescription] = useState("");
+  const [templateQuery, setTemplateQuery] = useState("");
   const [name, setName] = useState("");
   const [systemId, setSystemId] = useState("");
   const [importText, setImportText] = useState("");
 
   const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows.list });
   const systems = useQuery({ queryKey: ["systems"], queryFn: api.systems.list });
+  const templates = useQuery({
+    queryKey: ["templates", templateQuery],
+    queryFn: () => api.templates.search(templateQuery),
+    enabled: templateQuery.trim().length > 0,
+  });
+
+  const loadContext = useMutation({
+    mutationFn: () => api.ai.context(),
+    onSuccess: (context) => {
+      setAiContext(JSON.stringify(context, null, 2));
+      setShowAiContext(true);
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
+
+  const createFromTemplate = useMutation({
+    mutationFn: (template: { name: string; dsl: FlowDsl }) =>
+      api.flows.create({ name: `${template.name} · 副本`, dsl: template.dsl }),
+    onSuccess: (flow) => {
+      void queryClient.invalidateQueries({ queryKey: ["flows"] });
+      navigate(`/flows/${flow.id}`);
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
+
+  const aiDraft = useMutation({
+    mutationFn: () => api.ai.draft(aiDescription),
+    onSuccess: (result) => {
+      setImportText(JSON.stringify(result.dsl, null, 2));
+      toast(`AI 草稿已生成：L${result.readiness.level}，所有节点标记待确认`, "success");
+    },
+    onError: (error: Error) => toast(error.message, "error"),
+  });
 
   const create = useMutation({
     mutationFn: async () => {
@@ -111,6 +148,9 @@ export function FlowsPage() {
         description="Flow DSL 是唯一执行契约。画布、导入与草稿都落成同一份 JSON；发布后的版本不可变。"
         actions={
           <>
+            <button className="ff-btn" onClick={() => loadContext.mutate()}>
+              AI 上下文
+            </button>
             <button className="ff-btn" onClick={() => setShowImport(true)}>
               导入 JSON
             </button>
@@ -136,6 +176,29 @@ export function FlowsPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="ff-kicker">模板检索</div>
+        <input
+          className="ff-input max-w-[320px]"
+          value={templateQuery}
+          onChange={(event) => setTemplateQuery(event.target.value)}
+          placeholder="按名称 / 标签 / 节点名搜索已有流程"
+        />
+        {templates.data?.templates.map((template) => (
+          <button
+            key={template.flow.id}
+            className="ff-badge ff-badge-ember"
+            title={`相似度 ${template.score}`}
+            onClick={() => createFromTemplate.mutate(template.flow)}
+          >
+            基于「{template.flow.name}」创建 · {Math.round(template.score * 100)}%
+          </button>
+        ))}
+        {templateQuery && templates.data?.templates.length === 0 ? (
+          <span className="font-mono text-[10px] text-forge-400">没有相似模板</span>
+        ) : null}
       </div>
 
       <SectionTitle index="01">流程索引</SectionTitle>
@@ -262,6 +325,38 @@ export function FlowsPage() {
         </div>
       ) : null}
 
+      {showAiContext ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="ff-panel flex max-h-[88vh] w-full max-w-3xl flex-col p-6">
+            <div className="ff-kicker">AI Context Pack</div>
+            <h2 className="ff-display mt-1 text-2xl">可复制的上下文包</h2>
+            <p className="mt-2 text-[12px] leading-5 text-forge-400">
+              包含 schema、节点类型、模板命名空间与系统/数据集摘要；不包含 cookies、env 值、密码与
+              storageState 路径。把它和自然语言描述一起交给 Chat，返回 JSON 后走导入预览。
+            </p>
+            <textarea
+              className="ff-textarea mt-4 min-h-[400px] flex-1"
+              value={aiContext}
+              readOnly
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                className="ff-btn"
+                onClick={() => {
+                  void navigator.clipboard.writeText(aiContext);
+                  toast("上下文已复制", "success");
+                }}
+              >
+                复制
+              </button>
+              <button className="ff-btn" onClick={() => setShowAiContext(false)}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showImport ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="ff-panel w-full max-w-3xl p-6">
@@ -270,6 +365,24 @@ export function FlowsPage() {
             <p className="mt-2 text-[12px] text-forge-400">
               导入会执行 schema 校验、归一化与就绪度计算；未确认项不会自动运行。
             </p>
+            <div className="mt-3 border border-forge-700 bg-forge-900/40 p-3">
+              <div className="ff-kicker mb-2">AI 草稿（默认关闭，输出必须确认）</div>
+              <div className="flex gap-2">
+                <input
+                  className="ff-input"
+                  value={aiDescription}
+                  onChange={(event) => setAiDescription(event.target.value)}
+                  placeholder="用一句中文描述流程，例如：打开客户列表，新建客户并选择区域后保存"
+                />
+                <button
+                  className="ff-btn"
+                  disabled={aiDescription.trim().length < 3 || aiDraft.isPending}
+                  onClick={() => aiDraft.mutate()}
+                >
+                  {aiDraft.isPending ? "生成中…" : "生成草稿"}
+                </button>
+              </div>
+            </div>
             <textarea
               className="ff-textarea mt-4 h-[420px]"
               value={importText}

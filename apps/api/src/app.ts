@@ -6,6 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { ZodError } from "zod";
 import type { AppDeps } from "./deps.js";
 import { ApiError } from "./lib/errors.js";
+import { registerAiRoutes } from "./routes/ai.js";
 import { registerFlowRoutes } from "./routes/flows.js";
 import { registerInspectorRoutes } from "./routes/inspector.js";
 import { registerRecordingRoutes } from "./routes/recordings.js";
@@ -62,6 +63,7 @@ export function createApp(deps: AppDeps): AppRuntime {
   registerRecordingRoutes(app, deps);
   registerSettingsRoutes(app, deps);
   registerSpecRoutes(app, deps);
+  registerAiRoutes(app, deps);
 
   app.get(
     "/api/runs/:id/events",
