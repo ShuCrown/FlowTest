@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+artifacts/
+data/
+apps/web/dist/
+*.log
+.DS_Store
+test-results/
+playwright-report/
+coverage/
+.tmp/

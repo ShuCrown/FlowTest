@@ -1,0 +1,372 @@
+@import "tailwindcss";
+
+@theme {
+  --color-forge-950: #08090b;
+  --color-forge-900: #0d0f12;
+  --color-forge-850: #12151a;
+  --color-forge-800: #171b21;
+  --color-forge-700: #232830;
+  --color-forge-600: #343a44;
+  --color-forge-400: #8b929d;
+  --color-forge-300: #b7bcc4;
+  --color-paper: #ece7dc;
+  --color-ember-500: #f0a23a;
+  --color-ember-400: #ffbb5c;
+  --color-ember-600: #c77d1c;
+  --color-rust-500: #d36142;
+  --color-moss-400: #64b39f;
+  --color-sky-400: #6ea8c9;
+
+  --font-display: "Songti SC", "STSong", "Noto Serif CJK SC", Georgia, serif;
+  --font-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Mono", ui-monospace, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --bg: #0d0f12;
+  --panel: #12151a;
+  --line: #262b33;
+  --muted: #8b929d;
+  --text: #ece7dc;
+  --ember: #f0a23a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1200px 500px at 92% -10%, rgba(240, 162, 58, 0.08), transparent 60%),
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: auto, 36px 36px, 36px 36px;
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(240, 162, 58, 0.35);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0b0d;
+}
+::-webkit-scrollbar-thumb {
+  background: #2d323a;
+  border: 2px solid #0a0b0d;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #414852;
+}
+
+@layer components {
+  .ff-kicker {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .ff-display {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .ff-panel {
+    background: linear-gradient(180deg, rgba(23, 27, 33, 0.92), rgba(14, 16, 20, 0.94));
+    border: 1px solid var(--line);
+  }
+
+  .ff-input,
+  .ff-select,
+  .ff-textarea {
+    width: 100%;
+    background: #0b0d10;
+    border: 1px solid #303640;
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: var(--font-body);
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .ff-input:focus,
+  .ff-select:focus,
+  .ff-textarea:focus {
+    border-color: var(--ember);
+    box-shadow: 0 0 0 1px rgba(240, 162, 58, 0.25);
+  }
+  .ff-textarea {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+  .ff-select {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, #8b929d 50%),
+      linear-gradient(135deg, #8b929d 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 28px;
+  }
+  .ff-input::placeholder,
+  .ff-textarea::placeholder {
+    color: #555d68;
+  }
+  .ff-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .ff-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid #3a414c;
+    background: #171b21;
+    color: var(--text);
+    padding: 7px 12px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: transform 100ms ease, border-color 120ms ease, background 120ms ease;
+    white-space: nowrap;
+  }
+  .ff-btn:hover {
+    border-color: var(--ember);
+    background: #1d222a;
+  }
+  .ff-btn:active {
+    transform: translateY(1px);
+  }
+  .ff-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .ff-btn-primary {
+    background: var(--ember);
+    border-color: var(--ember);
+    color: #14100a;
+    font-weight: 600;
+  }
+  .ff-btn-primary:hover {
+    background: var(--color-ember-400);
+    border-color: var(--color-ember-400);
+  }
+  .ff-btn-danger {
+    border-color: rgba(211, 97, 66, 0.55);
+    color: #f0a58f;
+  }
+  .ff-btn-danger:hover {
+    border-color: var(--color-rust-500);
+    background: rgba(211, 97, 66, 0.12);
+  }
+  .ff-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+  }
+  .ff-btn-ghost:hover {
+    color: var(--text);
+    border-color: #343a44;
+  }
+
+  .ff-card {
+    background: linear-gradient(180deg, rgba(23, 27, 33, 0.85), rgba(14, 16, 20, 0.9));
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    position: relative;
+  }
+  .ff-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 22px;
+    height: 22px;
+    border-left: 1px solid rgba(240, 162, 58, 0.55);
+    border-top: 1px solid rgba(240, 162, 58, 0.55);
+    pointer-events: none;
+  }
+
+  .ff-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #343a44;
+    padding: 2px 7px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 2px;
+    color: var(--color-forge-300);
+  }
+  .ff-badge-ember {
+    color: var(--color-ember-400);
+    border-color: rgba(240, 162, 58, 0.45);
+    background: rgba(240, 162, 58, 0.08);
+  }
+  .ff-badge-good {
+    color: var(--color-moss-400);
+    border-color: rgba(100, 179, 159, 0.45);
+    background: rgba(100, 179, 159, 0.08);
+  }
+  .ff-badge-bad {
+    color: #f0a58f;
+    border-color: rgba(211, 97, 66, 0.5);
+    background: rgba(211, 97, 66, 0.1);
+  }
+
+  .ff-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .ff-table th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.015);
+  }
+  .ff-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(38, 43, 51, 0.7);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  .ff-table tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+  }
+}
+
+.ff-fade-up {
+  animation: ff-fade-up 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes ff-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ff-pulse {
+  animation: ff-pulse 1.8s ease-in-out infinite;
+}
+@keyframes ff-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.ff-scan {
+  position: relative;
+  overflow: hidden;
+}
+.ff-scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(240, 162, 58, 0.08) 50%, transparent 100%);
+  transform: translateY(-100%);
+  animation: ff-scan 4s linear infinite;
+  pointer-events: none;
+}
+@keyframes ff-scan {
+  to {
+    transform: translateY(100%);
+  }
+}
+
+/* React Flow */
+.react-flow__background {
+  background: #0b0d10;
+}
+.react-flow__minimap {
+  background: #101318 !important;
+  border: 1px solid #262b33;
+}
+.react-flow__controls {
+  background: #12151a;
+  border: 1px solid #262b33;
+  box-shadow: none;
+}
+.react-flow__controls-button {
+  background: #12151a;
+  border-bottom: 1px solid #262b33;
+  fill: #b7bcc4;
+}
+.react-flow__controls-button:hover {
+  background: #1d222a;
+}
+.react-flow__edge-path {
+  stroke: #5d6672;
+  stroke-width: 1.5;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #f0a23a;
+}
+.react-flow__edge-text {
+  fill: #f0a23a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.react-flow__connection-path {
+  stroke: #f0a23a;
+  stroke-width: 1.5;
+}
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: #12151a;
+  border: 1px solid #f0a23a;
+  border-radius: 1px;
+}
+.react-flow__node.selected .ff-node-card {
+  border-color: rgba(240, 162, 58, 0.8);
+  box-shadow: 0 0 0 1px rgba(240, 162, 58, 0.35), 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.react-flow__attribution {
+  display: none;
+}

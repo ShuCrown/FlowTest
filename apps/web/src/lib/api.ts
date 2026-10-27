@@ -1,0 +1,347 @@
+import type {
+  FlowDetail,
+  FlowSummary,
+  InspectorSession,
+  MatrixResponse,
+  RecordingDetail,
+  RecordingRow,
+  RunDetail,
+  RunRow,
+  Settings,
+  SystemRow,
+} from "./types.js";
+import type { FlowDsl } from "@flowforge/dsl";
+
+export class ApiClientError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly pointer?: string;
+  readonly details?: unknown;
+
+  constructor(
+    message: string,
+    options: { code?: string; status?: number; pointer?: string; details?: unknown } = {},
+  ) {
+    super(message);
+    this.name = "ApiClientError";
+    this.code = options.code ?? "API_ERROR";
+    this.status = options.status ?? 500;
+    this.pointer = options.pointer;
+    this.details = options.details;
+  }
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    headers: {
+      "content-type": "application/json",
+      ...(init.headers ?? {}),
+    },
+    ...init,
+  });
+  const text = await response.text();
+  let body: unknown = undefined;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  if (!response.ok) {
+    const payload = body as { error?: { code?: string; message?: string; pointer?: string; details?: unknown } };
+    throw new ApiClientError(payload?.error?.message ?? `请求失败 ${response.status}`, {
+      code: payload?.error?.code,
+      status: response.status,
+      pointer: payload?.error?.pointer,
+      details: payload?.error?.details,
+    });
+  }
+  return body as T;
+}
+
+export const api = {
+  systems: {
+    list: () => request<{ systems: SystemRow[] }>("/api/systems").then((r) => r.systems),
+    create: (body: {
+      id?: string;
+      name: string;
+      baseUrl: string;
+      auth?: { kind: string; path?: string; env?: string };
+    }) => request<SystemRow>("/api/systems", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: Partial<SystemRow>) =>
+      request<SystemRow>(`/api/systems/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/systems/${id}`, { method: "DELETE" }),
+    openSession: (id: string, headless?: boolean) =>
+      request<{ session: InspectorSession }>(`/api/systems/${id}/session`, {
+        method: "POST",
+        body: JSON.stringify({ headless }),
+      }).then((r) => r.session),
+    saveSession: (id: string) =>
+      request<{ system: SystemRow; path: string }>(`/api/systems/${id}/session`, {
+        method: "PUT",
+      }),
+    closeSession: (id: string) =>
+      request<{ ok: boolean }>(`/api/systems/${id}/session`, { method: "DELETE" }),
+  },
+  flows: {
+    list: () => request<{ flows: FlowSummary[] }>("/api/flows").then((r) => r.flows),
+    get: (id: string) => request<FlowDetail>(`/api/flows/${id}`),
+    create: (body: { name?: string; dsl: FlowDsl; layout?: unknown }) =>
+      request<FlowDetail>("/api/flows", { method: "POST", body: JSON.stringify(body) }),
+    update: (
+      id: string,
+      body: { name?: string; dsl?: FlowDsl; layout?: unknown; revision?: number },
+    ) => request<FlowDetail>(`/api/flows/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/api/flows/${id}`, { method: "DELETE" }),
+    validate: (id: string, dsl?: FlowDsl) =>
+      request<{
+        ok: boolean;
+        readiness: { level: number; gaps: Array<Record<string, unknown>> };
+        lint: {
+          errors: Array<Record<string, unknown>>;
+          warnings: Array<Record<string, unknown>>;
+          infos: Array<Record<string, unknown>>;
+        };
+        errors: unknown[];
+      }>(`/api/flows/${id}/validate`, {
+        method: "POST",
+        body: JSON.stringify(dsl ? { dsl } : {}),
+      }),
+    publish: (id: string) =>
+      request<{ id: string; version: number; checksum: string; createdAt: string }>(
+        `/api/flows/${id}/publish`,
+        { method: "POST" },
+      ),
+    versions: (id: string) =>
+      request<{ versions: Array<{ id: string; version: number; createdAt: string }> }>(
+        `/api/flows/${id}/versions`,
+      ).then((r) => r.versions),
+    import: (body: { dsl: unknown; flowId?: string; save?: boolean }) =>
+      request<{ ok: boolean; diff?: unknown[]; flow?: FlowDetail }>("/api/flows/import", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
+  runs: {
+    list: (flowId?: string) =>
+      request<{ runs: RunRow[] }>(`/api/runs${flowId ? `?flowId=${flowId}` : ""}`).then(
+        (r) => r.runs,
+      ),
+    get: (id: string) => request<RunDetail>(`/api/runs/${id}`),
+    start: (
+      flowId: string,
+      body: {
+        datasetId?: string;
+        mode?: "probe" | "single";
+        versionId?: string;
+        stopAtNodeId?: string;
+        headless?: boolean;
+      },
+    ) => request<RunRow>(`/api/flows/${flowId}/runs`, { method: "POST", body: JSON.stringify(body) }),
+    batch: (
+      flowId: string,
+      body: { datasetIds?: string[]; versionId?: string; headless?: boolean },
+    ) =>
+      request<{ batch: { id: string; status: string }; runs: RunRow[] }>(
+        `/api/flows/${flowId}/batches`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    cancel: (id: string) => request<{ ok: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+    matrix: (flowId: string, batchId?: string) =>
+      request<MatrixResponse>(
+        `/api/flows/${flowId}/matrix${batchId ? `?batchId=${batchId}` : ""}`,
+      ),
+    confirm: (id: string, body: { requestId: string; action: "continue" | "abort"; nth?: number }) =>
+      request<{ ok: boolean }>(`/api/runs/${id}/confirm`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
+  inspector: {
+    current: () =>
+      request<{ session: InspectorSession | null }>("/api/inspector/current").then((r) => r.session),
+    open: (systemId: string, headless?: boolean, path?: string) =>
+      request<{ session: InspectorSession }>("/api/inspector/open", {
+        method: "POST",
+        body: JSON.stringify({ systemId, headless, path }),
+      }).then((r) => r.session),
+    pick: (id: string) =>
+      request<{
+        ok: boolean;
+        target?: import("@flowforge/dsl").TargetRef;
+        fingerprint?: unknown;
+        frameUrl?: string;
+        reason?: string;
+      }>(`/api/inspector/${id}/pick`, { method: "POST" }),
+    testTarget: (id: string, target: unknown) =>
+      request<{ ok: boolean; attempts: Array<{ strategy: string; count: number; error?: string }> }>(
+        `/api/inspector/${id}/test-target`,
+        { method: "POST", body: JSON.stringify({ target }) },
+      ),
+    close: (id: string) => request<{ ok: boolean }>(`/api/inspector/${id}/close`, { method: "POST" }),
+  },
+  recordings: {
+    list: () =>
+      request<{ recordings: RecordingRow[] }>("/api/recordings").then((r) => r.recordings),
+    start: (systemId: string) =>
+      request<{ id: string; sessionId: string; status: string }>("/api/recordings", {
+        method: "POST",
+        body: JSON.stringify({ systemId }),
+      }),
+    stop: (id: string) =>
+      request<RecordingDetail & { events: unknown[]; clusters: unknown[] }>(
+        `/api/recordings/${id}/stop`,
+        { method: "POST" },
+      ),
+    get: (id: string) => request<RecordingDetail>(`/api/recordings/${id}`),
+    synthesize: (id: string) =>
+      request<{
+        dsl: FlowDsl;
+        report: {
+          clusters: number;
+          nodes: number;
+          needsConfirm: number;
+          confidence: number;
+          warnings: string[];
+        };
+        clusters: unknown[];
+        ruleVersion: string;
+      }>(`/api/recordings/${id}/synthesize`, { method: "POST" }),
+    replay: (id: string, dsl?: FlowDsl) =>
+      request<{
+        runId: string;
+        draft: FlowDsl;
+        report: {
+          ok: boolean;
+          status: string;
+          nodeCount: number;
+          failed: Array<{ nodeId: string; code?: string; message?: string }>;
+          mismatches: Array<{ nodeId: string; reason: string }>;
+        };
+      }>(`/api/recordings/${id}/replay`, {
+        method: "POST",
+        body: JSON.stringify(dsl ? { dsl } : {}),
+      }),
+    refold: (id: string) =>
+      request<{ clusters: unknown[]; ruleVersion: string }>(`/api/recordings/${id}/refold`, {
+        method: "POST",
+      }),
+  },
+  settings: {
+    get: () => request<{ settings: Settings }>("/api/settings").then((r) => r.settings),
+    patch: (patch: Partial<Settings>) =>
+      request<{ settings: Settings }>("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }).then((r) => r.settings),
+  },
+  ai: {
+    context: (flowId?: string) =>
+      request<{ context: Record<string, unknown> }>(
+        `/api/ai/context${flowId ? `?flowId=${flowId}` : ""}`,
+      ).then((r) => r.context),
+    draft: (description: string, flowId?: string) =>
+      request<{
+        dsl: FlowDsl;
+        readiness: { level: number };
+        diff: unknown[];
+        needsConfirm: boolean;
+        applied: boolean;
+      }>("/api/ai/draft", {
+        method: "POST",
+        body: JSON.stringify({ description, flowId }),
+      }),
+    suggest: (kind: "field" | "condition", text: string, flowId?: string) =>
+      request<{
+        suggestion: unknown;
+        confidence: number;
+        needsConfirm: boolean;
+        source: string;
+      }>("/api/ai/suggest", {
+        method: "POST",
+        body: JSON.stringify({ kind, text, flowId }),
+      }),
+  },
+  templates: {
+    search: (query: string) =>
+      request<{
+        templates: Array<{
+          score: number;
+          flow: {
+            id: string;
+            name: string;
+            tags: string[];
+            readiness: number;
+            publishedVersion: number | null;
+            dsl: FlowDsl;
+          };
+        }>;
+      }>(`/api/templates/search?q=${encodeURIComponent(query)}`),
+  },
+  repair: {
+    healed: (flowId: string) =>
+      request<{
+        healed: Array<{
+          runId: string;
+          nodeId: string;
+          nodeType: string;
+          status: string;
+          durationMs: number;
+          datasetId: string | null;
+          runStatus: string;
+          createdAt: string;
+          screenshotPath: string | null;
+          resolvedTarget: {
+            strategy: string;
+            index: number;
+            matchCount: number;
+            healed: boolean;
+            confidence: number;
+          } | null;
+        }>;
+      }>(`/api/flows/${flowId}/healed`).then((r) => r.healed),
+    repairs: (flowId: string) =>
+      request<{ repairs: Array<Record<string, unknown>> }>(
+        `/api/flows/${flowId}/repairs`,
+      ).then((r) => r.repairs),
+    health: (flowId: string) =>
+      request<{
+        health: {
+          recentRuns: number;
+          failed: number;
+          healed: number;
+          runs: Array<{
+            id: string;
+            status: string;
+            datasetId: string | null;
+            startedAt: string | null;
+            finishedAt: string | null;
+          }>;
+        };
+      }>(`/api/flows/${flowId}/health`).then((r) => r.health),
+    apply: (
+      flowId: string,
+      body: {
+        nodeId: string;
+        action: "promote" | "replace";
+        targetPath?: "target" | "trigger" | "panel" | "commit";
+        strategyIndex?: number;
+        strategy?: unknown;
+      },
+    ) =>
+      request<{ flow: FlowDetail; repair: Record<string, unknown> }>(
+        `/api/flows/${flowId}/repair`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+  },
+  health: () =>
+    request<{
+      ok: boolean;
+      playwright: { version: string; chromium: string | null };
+      dataDir: string;
+      dataWritable: boolean;
+      db: { ok: boolean; path: string };
+      runtime: string;
+    }>("/api/health"),
+};
